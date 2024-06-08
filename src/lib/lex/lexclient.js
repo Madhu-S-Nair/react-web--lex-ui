@@ -1,10 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import PropTypes from 'prop-types';
-import AWS from 'aws-sdk';
+import { LexRuntimeV2Client, RecognizeTextCommand } from "@aws-sdk/client-lex-runtime-v2";
 import "../../styles/chatbot.css";
+import AWS from 'aws-sdk'
 
 const LexChat = ({
   botName,
+  botAliasId,
+  localeId,
   IdentityPoolId,
   placeholder,
   backgroundColor = '#FFFFFF',
@@ -19,18 +22,20 @@ const LexChat = ({
 
   useEffect(() => {
     document.getElementById("inputField").focus();
-    AWS.config.region = 'us-east-1';
-    AWS.config.credentials = new AWS.CognitoIdentityCredentials({
-      IdentityPoolId,
+    const client = new LexRuntimeV2Client({
+      region: 'us-east-1',
+      credentials: new AWS.CognitoIdentityCredentials({
+        IdentityPoolId,
+      })
     });
-    lexruntime.current = new AWS.LexRuntime();
+    lexruntime.current = client;
   }, [IdentityPoolId]);
 
   const handleClick = () => {
     setVisible(visible === 'open' ? 'closed' : 'open');
   };
 
-  const pushChat = (event) => {
+  const pushChat = async (event) => {
     event.preventDefault();
     const inputFieldText = document.getElementById('inputField');
 
@@ -40,26 +45,28 @@ const LexChat = ({
       inputFieldText.locked = true;
 
       const params = {
-        botAlias: '$LATEST',
-        botName,
-        inputText: inputField,
-        userId: lexUserId,
-        sessionAttributes,
+        botAliasId,
+        botId: botName,
+        localeId,
+        sessionId: lexUserId,
+        text: inputField,
+        sessionState: {
+          sessionAttributes,
+        },
       };
 
       showRequest(inputField);
-      lexruntime.current.postText(params, (err, data) => {
-        if (err) {
-          console.error(err, err.stack);
-          showError('Error:  ' + err.message + ' (see console for details)');
-        }
-        if (data) {
-          setSessionAttributes(data.sessionAttributes);
-          showResponse(data);
-        }
-        inputFieldText.value = '';
-        inputFieldText.locked = false;
-      });
+      try {
+        const command = new RecognizeTextCommand(params);
+        const data = await lexruntime.current.send(command);
+        setSessionAttributes(data.sessionState.sessionAttributes);
+        showResponse(data);
+      } catch (err) {
+        console.error(err);
+        showError('Error: ' + err.message + ' (see console for details)');
+      }
+      inputFieldText.value = '';
+      inputFieldText.locked = false;
     }
     return false;
   };
@@ -86,14 +93,16 @@ const LexChat = ({
     const conversationDiv = document.getElementById('conversation');
     const responsePara = document.createElement("P");
     responsePara.className = 'lexResponse';
-    if (lexResponse.message) {
-      responsePara.appendChild(document.createTextNode(lexResponse.message));
-      responsePara.appendChild(document.createElement('br'));
+    if (lexResponse.messages && lexResponse.messages.length > 0) {
+      lexResponse.messages.forEach(message => {
+        if (message.content) {
+          responsePara.appendChild(document.createTextNode(message.content));
+          responsePara.appendChild(document.createElement('br'));
+        }
+      });
     }
-    if (lexResponse.dialogState === 'ReadyForFulfillment') {
+    if (lexResponse.sessionState.dialogAction.type === 'ReadyForFulfillment') {
       responsePara.appendChild(document.createTextNode('Ready for fulfillment'));
-    } else {
-      responsePara.appendChild(document.createTextNode(''));
     }
     conversationDiv.appendChild(responsePara);
     conversationDiv.scrollTop = conversationDiv.scrollHeight;
@@ -169,7 +178,9 @@ const LexChat = ({
 };
 
 LexChat.propTypes = {
-  botName: PropTypes.string,
+  botName: PropTypes.string.isRequired,
+  botAliasId: PropTypes.string.isRequired,
+  localeId: PropTypes.string.isRequired,
   IdentityPoolId: PropTypes.string.isRequired,
   placeholder: PropTypes.string.isRequired,
   backgroundColor: PropTypes.string,
