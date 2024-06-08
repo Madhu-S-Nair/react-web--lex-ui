@@ -1,12 +1,13 @@
 import logo from './logo.svg';
 import './App.css';
-import Chatbot from './Chatbot';
+import LexClient from './lib/lex/lexclient';
+import awsConfig from './awsConfig';
 
 function App() {
   return (
     <div className="App">
       <header className="App-header">
-       <Chatbot/>
+      <LexClient config={awsConfig} />
       </header>
     </div>
   );
