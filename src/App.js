@@ -1,14 +1,14 @@
 import logo from './logo.svg';
 import './App.css';
-import LexChat from './lib/lex/lexclient';
+import Chatbot from './Chatbot';
 
 
 function App() {
   return (
     <div className="App">
       <header className="App-header">
-    <LexChat></LexChat>
       </header>
+      <Chatbot/>
     </div>
   );
 }

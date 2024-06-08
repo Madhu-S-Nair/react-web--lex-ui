@@ -1,64 +1,60 @@
 // src/Chatbot.js
 import React, { useState } from 'react';
-import { Interactions } from '@aws-amplify/interactions';
-import AWS from 'aws-sdk';
-
-const polly = new AWS.Polly({ region: 'your-region' });
+import { AWS, LEX_BOT_NAME, LEX_BOT_ALIAS, LEX_BOT_LOCALE } from './aws-config';
 
 const Chatbot = () => {
   const [messages, setMessages] = useState([]);
-  const [input, setInput] = useState('');
+  const [inputText, setInputText] = useState('');
 
-  const handleSend = async (text) => {
-    const response = await Interactions.send("YourBotName", text);
-    setMessages([...messages, { type: 'user', content: text }, { type: 'bot', content: response.message }]);
-    speak(response.message);
-  };
+  const lexRuntime = new AWS.LexRuntimeV2();
 
-  const speak = (text) => {
+  const handleSendMessage = async () => {
+    if (inputText.trim() === '') return;
+
+    const newMessage = { text: inputText, sender: 'user' };
+    setMessages([...messages, newMessage]);
+
     const params = {
-      OutputFormat: 'mp3',
-      Text: text,
-      VoiceId: 'Joanna'
+      botAliasId: LEX_BOT_ALIAS,
+      botId: LEX_BOT_NAME,
+      localeId: LEX_BOT_LOCALE,
+      sessionId: AWS.config.credentials.identityId,
+      text: inputText,
     };
-    polly.synthesizeSpeech(params, (err, data) => {
-      if (err) console.log(err, err.stack);
-      else {
-        const uInt8Array = new Uint8Array(data.AudioStream);
-        const arrayBuffer = uInt8Array.buffer;
-        const blob = new Blob([arrayBuffer], { type: 'audio/mpeg' });
-        const audioUrl = URL.createObjectURL(blob);
-        const audio = new Audio(audioUrl);
-        audio.play();
+
+    lexRuntime.recognizeText(params, (err, data) => {
+      if (err) {
+        console.error(err);
+      } else if (data && data.messages) {
+        const botMessages = data.messages.map(msg => ({
+          text: msg.content,
+          sender: 'bot',
+        }));
+        setMessages([...messages, newMessage, ...botMessages]);
       }
     });
-  };
 
-  const handleAudioInput = () => {
-    const recognition = new window.webkitSpeechRecognition();
-    recognition.lang = 'en-US';
-    recognition.start();
-
-    recognition.onresult = (event) => {
-      const speechResult = event.results[0][0].transcript;
-      handleSend(speechResult);
-    };
-
-    recognition.onerror = (event) => {
-      console.error(event.error);
-    };
+    setInputText('');
   };
 
   return (
     <div>
-      <div>
-        {messages.map((msg, idx) => (
-          <div key={idx} className={msg.type}>{msg.content}</div>
+      <div className="chat-window">
+        {messages.map((msg, index) => (
+          <div key={index} className={`message ${msg.sender}`}>
+            {msg.text}
+          </div>
         ))}
       </div>
-      <input value={input} onChange={(e) => setInput(e.target.value)} />
-      <button onClick={() => handleSend(input)}>Send</button>
-      <button onClick={handleAudioInput}>Send Audio</button>
+      <div className="input-container">
+        <input
+          type="text"
+          value={inputText}
+          onChange={(e) => setInputText(e.target.value)}
+          onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
+        />
+        <button onClick={handleSendMessage}>Send</button>
+      </div>
     </div>
   );
 };
