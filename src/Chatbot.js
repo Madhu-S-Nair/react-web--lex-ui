@@ -17,12 +17,17 @@ const b64CompressedToObject = (src) => {
 const Chatbot = () => {
   const [messages, setMessages] = useState([]);
   const [isRecording, setIsRecording] = useState(false);
-  const [buttonLabel, setButtonLabel] = useState('Speak');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [buttonLabel, setButtonLabel] = useState('Speak');
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
-  const sessionAttributes = useRef({});
   const audioElementRef = useRef(null);
+  const sessionAttributes = useRef({});
+  const silenceTimeoutRef = useRef(null);
+  const audioContextRef = useRef(null);
+  const analyserRef = useRef(null);
+  const silenceThreshold = -50; // Decibels
+  const silenceDuration = 1000; // 1 second
 
   const handleSendMessage = async (inputText) => {
     if (inputText.trim() === '') return;
@@ -62,6 +67,41 @@ const Chatbot = () => {
     setIsRecording(true);
     navigator.mediaDevices.getUserMedia({ audio: true })
       .then(stream => {
+        audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
+        const source = audioContextRef.current.createMediaStreamSource(stream);
+        analyserRef.current = audioContextRef.current.createAnalyser();
+        source.connect(analyserRef.current);
+        analyserRef.current.fftSize = 2048;
+        const bufferLength = analyserRef.current.frequencyBinCount;
+        const dataArray = new Uint8Array(bufferLength);
+
+        const checkSilence = () => {
+          analyserRef.current.getByteTimeDomainData(dataArray);
+          let sum = 0;
+          for (let i = 0; i < bufferLength; i++) {
+            const value = (dataArray[i] / 128) - 1;
+            sum += value * value;
+          }
+          const volume = 20 * Math.log10(Math.sqrt(sum / bufferLength));
+          if (volume < silenceThreshold) {
+            if (!silenceTimeoutRef.current) {
+              silenceTimeoutRef.current = setTimeout(() => {
+                if (isRecording) {
+                  stopRecording();
+                  setButtonLabel('Processing');
+                }
+              }, silenceDuration);
+            }
+          } else {
+            clearTimeout(silenceTimeoutRef.current);
+            silenceTimeoutRef.current = null;
+          }
+          if (isRecording) {
+            requestAnimationFrame(checkSilence);
+          }
+        };
+        checkSilence();
+
         const mediaRecorder = new MediaRecorder(stream);
         mediaRecorderRef.current = mediaRecorder;
 
@@ -76,6 +116,12 @@ const Chatbot = () => {
         };
 
         mediaRecorder.start();
+        setTimeout(() => {
+          if (isRecording) {
+            stopRecording();
+            setButtonLabel('Processing');
+          }
+        }, 5000); // Maximum recording time
       });
   };
 
@@ -83,6 +129,10 @@ const Chatbot = () => {
     setIsRecording(false);
     if (mediaRecorderRef.current) {
       mediaRecorderRef.current.stop();
+    }
+    if (audioContextRef.current) {
+      audioContextRef.current.close();
+      audioContextRef.current = null;
     }
   };
 
@@ -178,25 +228,23 @@ const Chatbot = () => {
     const reader = new FileReader();
     reader.onload = async () => {
       const audioData = reader.result;
-
+  
       const sessionState = {
         sessionAttributes: sessionAttributes.current,
       };
-
+  
       const params = {
         botAliasId: LEX_BOT_ALIAS,
         botId: LEX_BOT_NAME,
         localeId: LEX_BOT_LOCALE,
         sessionId: AWS.config.credentials.identityId,
         responseContentType: 'audio/pcm',
-        requestContentType: 'audio/lpcm; sample-rate=8000; sample-size-bits=16; channel-count=1; is-big-endian=false', // Reduced sample rate
+        requestContentType: 'audio/lpcm; sample-rate=8000; sample-size-bits=16; channel-count=1; is-big-endian=false',
         inputStream: new Blob([audioData], { type: 'audio/lpcm' }),
         sessionState: compressAndB64Encode(sessionState),
       };
-
+  
       try {
-        setButtonLabel('Processing');
-        setIsProcessing(true);
         const start = performance.now();
         const data = await lexRuntimeV2.recognizeUtterance(params).promise();
         const end = performance.now();
@@ -208,7 +256,7 @@ const Chatbot = () => {
     };
     reader.readAsArrayBuffer(audioBlob);
   };
-
+  
   const handleLexResponse = async (data) => {
     console.log('Lex response:', data);
   
@@ -234,12 +282,8 @@ const Chatbot = () => {
           setButtonLabel('Speak');
           setIsProcessing(false);
         };
-        setButtonLabel('Stop');
-        setIsProcessing(false);
       } catch (error) {
         console.error('Error synthesizing and playing speech:', error);
-        setButtonLabel('Speak');
-        setIsProcessing(false);
       }
     } else {
       console.error('No messages in response:', data);
@@ -267,7 +311,7 @@ const Chatbot = () => {
     const params = {
       OutputFormat: 'mp3',
       Text: text,
-      VoiceId: 'Joanna', // You can choose any available voice
+      VoiceId: 'Joanna',
     };
   
     try {
@@ -299,7 +343,9 @@ const Chatbot = () => {
   
   useEffect(() => {
     const handleContinueConversation = () => {
-      startRecording();
+      if (!isProcessing) {
+        setButtonLabel('Speak');
+      }
     };
   
     const audioElement = document.querySelector('audio');
@@ -309,27 +355,21 @@ const Chatbot = () => {
   }, [messages]);
   
   const handleButtonClick = () => {
-    if (isProcessing) {
+    if (buttonLabel === 'Speak') {
+      setButtonLabel('Listening...');
+      setTimeout(() => {
+        if (isRecording) {
+          stopRecording();
+          setButtonLabel('Processing');
+        }
+      }, 1500); // Wait for 1.5 seconds to detect if the user is speaking
+      startRecording();
+    } else if (buttonLabel === 'Stop') {
       if (audioElementRef.current) {
         audioElementRef.current.pause();
         audioElementRef.current.currentTime = 0;
-        setButtonLabel('Speak');
-        setIsProcessing(false);
       }
-    } else {
-      if (!isRecording) {
-        setButtonLabel('Recording...');
-        startRecording();
-        setTimeout(() => {
-          if (isRecording) {
-            stopRecording();
-            setButtonLabel('Processing');
-          }
-        }, 5000); // Record for max 5 seconds
-      } else {
-        stopRecording();
-        setButtonLabel('Processing');
-      }
+      setButtonLabel('Speak');
     }
   };
   
