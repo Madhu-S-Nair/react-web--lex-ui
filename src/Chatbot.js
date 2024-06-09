@@ -203,54 +203,78 @@ const Chatbot = () => {
     reader.readAsArrayBuffer(audioBlob);
   };
 
-  const handleLexResponse = async (data) => {
+  const handleLexResponse = (data) => {
     console.log('Lex response:', data);
-  
+
     if (data.messages) {
-      let botMessage = b64CompressedToObject(data.messages);
-      console.log('Bot says:', botMessage);
-      botMessage = processLexMessages(botMessage);
-  
+      let botMessages = b64CompressedToObject(data.messages);
+      console.log('Bot says:', botMessages);
+      botMessages = processLexMessages(botMessages);
+      synthesizeSpeech(botMessages.map(msg => msg.value).join(' '));
+
       setMessages((prevMessages) => [
         ...prevMessages,
-        { text: botMessage, sender: 'bot' },
+        ...botMessages.map(msg => ({ text: msg.value, sender: 'bot' }))
       ]);
     } else {
       console.error('No messages in response:', data);
     }
-  
+
     if (data.audioStream) {
-      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-      const audioUint8Array = new Uint8Array(data.audioStream);
-      const audioBuffer = await audioContext.decodeAudioData(audioUint8Array.buffer);
+      try {
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const audioUint8Array = new Uint8Array(data.audioStream);
+        
+        // Depending on the content type, we need to correctly specify the MIME type.
+        let audioBlob;
+        if (data.contentType === 'audio/mpeg') {
+          audioBlob = new Blob([audioUint8Array], { type: 'audio/mpeg' });
+        } else if (data.contentType === 'audio/ogg') {
+          audioBlob = new Blob([audioUint8Array], { type: 'audio/ogg' });
+        } else if (data.contentType === 'audio/wav' || data.contentType === 'audio/pcm') {
+          audioBlob = new Blob([audioUint8Array], { type: 'audio/wav' });
+        } else {
+          console.error('Unsupported audio content type:', data.contentType);
+          return;
+        }
   
-      const source = audioContext.createBufferSource();
-      source.buffer = audioBuffer;
-      source.connect(audioContext.destination);
-      source.start(0);
+        const audioUrl = URL.createObjectURL(audioBlob);
+        const audioElement = new Audio(audioUrl);
+        
+        audioElement.addEventListener('error', (event) => {
+          console.error('Error playing audio:', event);
+        });
+  
+        audioElement.play().catch((error) => {
+          console.error('Error playing audio:', error);
+        });
+      } catch (error) {
+        console.error('Error handling audio stream:', error);
+      }
     } else {
       console.error('No audioStream in response:', data);
     }
+  
   };
 
-  // const synthesizeSpeech = (text) => {
-  //   const params = {
-  //     OutputFormat: 'mp3',
-  //     Text: text,
-  //     VoiceId: 'Joanna',
-  //   };
+  const synthesizeSpeech = (text) => {
+    const params = {
+      OutputFormat: 'mp3',
+      Text: text,
+      VoiceId: 'Joanna',
+    };
 
-  //   polly.synthesizeSpeech(params, (err, data) => {
-  //     if (err) {
-  //       console.error(err);
-  //     } else if (data && data.AudioStream instanceof Buffer) {
-  //       const audioBlob = new Blob([data.AudioStream], { type: 'audio/mpeg' });
-  //       const audioUrl = URL.createObjectURL(audioBlob);
-  //       const audioElement = new Audio(audioUrl);
-  //       audioElement.play();
-  //     }
-  //   });
-  // };
+    polly.synthesizeSpeech(params, (err, data) => {
+      if (err) {
+        console.error(err);
+      } else if (data && data.AudioStream instanceof Buffer) {
+        const audioBlob = new Blob([data.AudioStream], { type: 'audio/mpeg' });
+        const audioUrl = URL.createObjectURL(audioBlob);
+        const audioElement = new Audio(audioUrl);
+        audioElement.play();
+      }
+    });
+  };
 
   const processLexMessages = (res) => {
     let finalMessages = [];
