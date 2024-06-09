@@ -206,9 +206,11 @@ const Chatbot = () => {
   const handleLexResponse = (data) => {
     console.log('Lex response:', data);
 
-    if (data.messages && Array.isArray(data.messages)) {
-      const botMessage = b64CompressedToObject(data.messages);
+    if (data.messages ) {
+      let  botMessage = b64CompressedToObject(data.messages);
       console.log('Bot says:', botMessage);
+      botMessage = processLexMessages(botMessage)
+
       setMessages((prevMessages) => [
         ...prevMessages,
         { text: botMessage, sender: 'bot' }
@@ -227,6 +229,30 @@ const Chatbot = () => {
       console.error('No audioStream in response:', data);
     }
   };
+
+  const processLexMessages = (res) => {
+    let finalMessages = [];
+    if (res.messages && res.messages.length > 0) {
+      res.messages.forEach((mes) => {
+        if (mes.contentType === 'ImageResponseCard') {
+          res.responseCardLexV2 = res.responseCardLexV2 ? res.responseCardLexV2 : [];
+          const newCard = {};
+          newCard.version = '1';
+          newCard.contentType = 'application/vnd.amazonaws.card.generic';
+          newCard.genericAttachments = [];
+          newCard.genericAttachments.push(mes.imageResponseCard);
+          res.responseCardLexV2.push(newCard);
+        } else {
+          if (mes.contentType) {
+            const v1Format = { type: mes.contentType, value: mes.content, isLastMessageInGroup: "false" };
+            finalMessages.push(v1Format);
+          }
+        }
+      });
+    }
+    return finalMessages;
+  };
+
 
   useEffect(() => {
     const handleContinueConversation = () => {
