@@ -216,57 +216,59 @@ const Chatbot = () => {
         ...prevMessages,
         ...botMessages.map(msg => ({ text: msg.value, sender: 'bot' }))
       ]);
-    } else {
-      console.error('No messages in response:', data);
-    }
+   // Use Polly to synthesize speech and play audio
+   try {
+    const audioUrl = await synthesizeSpeech(botMessages);
+    const audioElement = new Audio(audioUrl);
+    audioElement.play().catch((error) => {
+      console.error('Error playing audio:', error);
+    });
+  } catch (error) {
+    console.error('Error synthesizing and playing speech:', error);
+  }
+} else {
+  console.error('No messages in response:', data);
+}
 
-    if (data.audioStream) {
-      try {
-        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        const audioUint8Array = new Uint8Array(data.audioStream);
-  
-        // Assuming audio/pcm format here, but adapt based on data.contentType if necessary
-        const audioBuffer = await audioContext.decodeAudioData(audioUint8Array.buffer);
-        const source = audioContext.createBufferSource();
-        source.buffer = audioBuffer;
-        source.connect(audioContext.destination);
-        source.start(0);
-  
-        // Optional: Create an audio element for fallback
-        const audioBlob = new Blob([audioUint8Array.buffer], { type: 'audio/wav' });
-        const audioUrl = URL.createObjectURL(audioBlob);
-        const audioElement = new Audio(audioUrl);
-        audioElement.play().catch((error) => {
-          console.error('Error playing fallback audio:', error);
-        });
-      } catch (error) {
-        console.error('Error handling audio stream:', error);
-      }
-    } else {
-      console.error('No audioStream in response:', data);
-    } 
+if (data.audioStream) {
+  try {
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const audioUint8Array = new Uint8Array(data.audioStream);
+    const audioBuffer = await audioContext.decodeAudioData(audioUint8Array.buffer);
+
+    const source = audioContext.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(audioContext.destination);
+    source.start(0);
+  } catch (error) {
+    console.error('Error handling audio stream:', error);
+  }
+} else {
+  console.error('No audioStream in response:', data);
+}
+
+    
   
 
   
   };
 
-  const synthesizeSpeech = (text) => {
+  const synthesizeSpeech = async (text) => {
     const params = {
       OutputFormat: 'mp3',
       Text: text,
-      VoiceId: 'Joanna',
+      VoiceId: 'Joanna', // You can choose any available voice
     };
-
-    polly.synthesizeSpeech(params, (err, data) => {
-      if (err) {
-        console.error(err);
-      } else if (data && data.AudioStream instanceof Buffer) {
-        const audioBlob = new Blob([data.AudioStream], { type: 'audio/mpeg' });
-        const audioUrl = URL.createObjectURL(audioBlob);
-        const audioElement = new Audio(audioUrl);
-        audioElement.play();
-      }
-    });
+  
+    try {
+      const data = await polly.synthesizeSpeech(params).promise();
+      const audioBlob = new Blob([data.AudioStream], { type: 'audio/mpeg' });
+      const audioUrl = URL.createObjectURL(audioBlob);
+      return audioUrl;
+    } catch (error) {
+      console.error('Error synthesizing speech:', error);
+      throw error;
+    }
   };
 
   const processLexMessages = (res) => {
