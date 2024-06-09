@@ -90,7 +90,7 @@ const Chatbot = () => {
       const audioContext = new (window.AudioContext || window.webkitAudioContext)();
       const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
 
-      const resampledBuffer = await resampleAudio(audioBuffer, 16000);
+      const resampledBuffer = await resampleAudio(audioBuffer, 8000); // Lower sample rate to 8000 Hz
       const l16Blob = audioBufferToWav(resampledBuffer);
 
       handleVoiceMessage(l16Blob);
@@ -120,7 +120,7 @@ const Chatbot = () => {
         buffer = new ArrayBuffer(length),
         view = new DataView(buffer),
         channels = [],
-        sample = 44000,
+        sample = 8000, // Sample rate set to 8000 Hz
         offset = 0,
         pos = 0;
 
@@ -182,7 +182,7 @@ const Chatbot = () => {
         localeId: LEX_BOT_LOCALE,
         sessionId: AWS.config.credentials.identityId,
         responseContentType: 'audio/pcm',
-        requestContentType: 'audio/x-l16; sample-rate=16000; channel-count=1',
+        requestContentType: 'audio/x-l16; sample-rate=8000; channel-count=1', // Reduced sample rate
         inputStream: new Blob([audioData], { type: 'audio/x-l16' }),
         sessionState: compressAndB64Encode(sessionState),
       };
@@ -205,14 +205,14 @@ const Chatbot = () => {
       console.log('Bot says:', botMessages);
       botMessages = processLexMessages(botMessages);
   
-      setMessages((prevMessages) => [
+      setMessages(prevMessages => [
         ...prevMessages,
-        ...botMessages.map((msg) => ({ text: msg.value, sender: 'bot' })),
+        ...botMessages.map(msg => ({ text: msg.value, sender: 'bot' }))
       ]);
   
       // Use Polly to synthesize speech and play audio
       try {
-        const audioUrl = await synthesizeSpeech(botMessages.map((msg) => msg.value).join(' '));
+        const audioUrl = await synthesizeSpeech(botMessages.map(msg => msg.value).join(' '));
         const audioElement = new Audio(audioUrl);
         audioElement.play().catch((error) => {
           console.error('Error playing audio:', error);
@@ -265,7 +265,7 @@ const Chatbot = () => {
     if (res.length > 0) {
       res.forEach((mes) => {
         if (mes.contentType === 'PlainText') {
-          const v1Format = { type: mes.contentType, value: mes.content, isLastMessageInGroup: 'false' };
+          const v1Format = { type: mes.contentType, value: mes.content, isLastMessageInGroup: "false" };
           finalMessages.push(v1Format);
         }
       });
@@ -294,12 +294,9 @@ const Chatbot = () => {
         ))}
       </div>
       <div className="input-area">
-        <input
-          type="text"
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') handleSendMessage(e.target.value);
-          }}
-        />
+        <input type="text" onKeyDown={(e) => {
+          if (e.key === 'Enter') handleSendMessage(e.target.value);
+        }} />
         <button onClick={isRecording ? stopRecording : startRecording}>
           {isRecording ? 'Stop' : 'Mic'}
         </button>
