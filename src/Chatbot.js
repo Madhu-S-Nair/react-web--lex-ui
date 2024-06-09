@@ -154,7 +154,7 @@ const Chatbot = () => {
       offset++; // next source sample
     }
 
-    return new Blob([buffer], { type: 'audio/x-l16' });
+    return new Blob([buffer], { type: 'audio/lpcm' });
 
     function setUint16(data) {
       view.setUint16(pos, data, true);
@@ -183,7 +183,7 @@ const Chatbot = () => {
         sessionId: AWS.config.credentials.identityId,
         responseContentType: 'audio/pcm',
         requestContentType: 'audio/lpcm; sample-rate=8000; sample-size-bits=16; channel-count=1; is-big-endian=false', // Reduced sample rate
-        inputStream: new Blob([audioData], { type: 'audio/x-l16' }),
+        inputStream: new Blob([audioData], { type: 'audio/lpcm' }),
         sessionState: compressAndB64Encode(sessionState),
       };
 
