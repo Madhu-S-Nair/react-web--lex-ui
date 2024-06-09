@@ -5,9 +5,12 @@ import pako from 'pako';
 const lexRuntimeV2 = new AWS.LexRuntimeV2();
 
 const b64CompressedToObject= (src) => {
-  const decompressedData = pako.ungzip(byteArray);
-  const jsonString = new TextDecoder().decode(decompressedData);
-  return JSON.parse(jsonString);
+  const binaryString = atob(src); // Decode base64 string
+  const charArray = binaryString.split('').map(char => char.charCodeAt(0)); // Convert to byte array
+  const byteArray = new Uint8Array(charArray); // Convert to Uint8Array
+  const decompressedData = pako.ungzip(byteArray); // Decompress using pako
+  const jsonString = new TextDecoder().decode(decompressedData); // Decode to string
+  return JSON.parse(jsonString); // Parse JSON string to object
 }
 
 
