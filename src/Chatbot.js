@@ -219,11 +219,23 @@ const Chatbot = () => {
     }
 
     if (data.audioStream) {
-      const audioBlob = new Blob([data.audioStream], { type: 'audio/wav' });
+      // Assuming audioStream is a Uint8Array directly
+      const audioUint8Array = new Uint8Array(data.audioStream);
+      const audioBlob = new Blob([audioUint8Array.buffer], { type: 'audio/ogg' });
+  
+      // Debugging: Log the Blob and check its type and size
+      console.log('Audio Blob:', audioBlob);
+  
       const audioUrl = URL.createObjectURL(audioBlob);
-      const audioElement = document.getElementById('audioPlayer');
-      audioElement.src = audioUrl;
-      audioElement.play();
+      
+      // Debugging: Log the URL to check if it's correctly formed
+      console.log('Audio URL:', audioUrl);
+  
+      // Creating an Audio element and playing the audio
+      const audioElement = new Audio(audioUrl);
+      audioElement.play().catch(error => {
+        console.error('Error playing audio:', error);
+      });
     } else {
       console.error('No audioStream in response:', data);
     }
