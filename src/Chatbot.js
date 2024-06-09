@@ -6,12 +6,12 @@ const lexRuntimeV2 = new AWS.LexRuntimeV2();
 const polly = new AWS.Polly();
 
 const b64CompressedToObject = (src) => {
-  const binaryString = atob(src); // Decode base64 string
-  const charArray = binaryString.split('').map(char => char.charCodeAt(0)); // Convert to byte array
-  const byteArray = new Uint8Array(charArray); // Convert to Uint8Array
-  const decompressedData = pako.ungzip(byteArray); // Decompress using pako
-  const jsonString = new TextDecoder().decode(decompressedData); // Decode to string
-  return JSON.parse(jsonString); // Parse JSON string to object
+  const binaryString = atob(src);
+  const charArray = binaryString.split('').map(char => char.charCodeAt(0));
+  const byteArray = new Uint8Array(charArray);
+  const decompressedData = pako.ungzip(byteArray);
+  const jsonString = new TextDecoder().decode(decompressedData);
+  return JSON.parse(jsonString);
 };
 
 const Chatbot = () => {
@@ -25,7 +25,7 @@ const Chatbot = () => {
     if (inputText.trim() === '') return;
 
     const newMessage = { text: inputText, sender: 'user' };
-    setMessages([...messages, newMessage]);
+    setMessages(prevMessages => [...prevMessages, newMessage]);
 
     const params = {
       botAliasId: LEX_BOT_ALIAS,
@@ -38,18 +38,17 @@ const Chatbot = () => {
       },
     };
 
-    lexRuntimeV2.recognizeText(params, (err, data) => {
-      if (err) {
-        console.error(err);
-      } else if (data) {
-        sessionAttributes.current = data.sessionState.sessionAttributes;
-        const botMessages = data.messages.map(msg => ({
-          text: msg.content,
-          sender: 'bot',
-        }));
-        setMessages([...messages, ...botMessages]);
-      }
-    });
+    try {
+      const data = await lexRuntimeV2.recognizeText(params).promise();
+      sessionAttributes.current = data.sessionState.sessionAttributes;
+      const botMessages = data.messages.map(msg => ({
+        text: msg.content,
+        sender: 'bot',
+      }));
+      setMessages(prevMessages => [...prevMessages, ...botMessages]);
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   const startRecording = () => {
@@ -86,14 +85,18 @@ const Chatbot = () => {
   };
 
   const processAndSendAudio = async (audioBlob) => {
-    const arrayBuffer = await audioBlob.arrayBuffer();
-    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+    try {
+      const arrayBuffer = await audioBlob.arrayBuffer();
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
 
-    const resampledBuffer = await resampleAudio(audioBuffer, 16000);
-    const l16Blob = audioBufferToWav(resampledBuffer);
+      const resampledBuffer = await resampleAudio(audioBuffer, 16000);
+      const l16Blob = audioBufferToWav(resampledBuffer);
 
-    handleVoiceMessage(l16Blob);
+      handleVoiceMessage(l16Blob);
+    } catch (err) {
+      console.error('Error processing and sending audio:', err);
+    }
   };
 
   const resampleAudio = (audioBuffer, targetSampleRate) => {
@@ -113,13 +116,13 @@ const Chatbot = () => {
 
   const audioBufferToWav = (audioBuffer) => {
     let numOfChan = audioBuffer.numberOfChannels,
-          length = audioBuffer.length * numOfChan * 2 + 44,
-          buffer = new ArrayBuffer(length),
-          view = new DataView(buffer),
-          channels = [],
-          sample=44000,
-          offset = 0,
-          pos = 0;
+        length = audioBuffer.length * numOfChan * 2 + 44,
+        buffer = new ArrayBuffer(length),
+        view = new DataView(buffer),
+        channels = [],
+        sample = 44000,
+        offset = 0,
+        pos = 0;
 
     setUint32(0x46464952); // "RIFF"
     setUint32(length - 8); // file length - 8
@@ -137,8 +140,9 @@ const Chatbot = () => {
     setUint32(0x61746164); // "data" - chunk
     setUint32(length - pos - 4); // chunk length
 
-    for (let i = 0; i < audioBuffer.numberOfChannels; i++)
+    for (let i = 0; i < audioBuffer.numberOfChannels; i++) {
       channels.push(audioBuffer.getChannelData(i));
+    }
 
     while (pos < length) {
       for (let i = 0; i < numOfChan; i++) { // interleave channels
@@ -165,7 +169,7 @@ const Chatbot = () => {
 
   const handleVoiceMessage = (audioBlob) => {
     const reader = new FileReader();
-    reader.onload = () => {
+    reader.onload = async () => {
       const audioData = reader.result;
 
       const sessionState = {
@@ -179,70 +183,65 @@ const Chatbot = () => {
         sessionId: AWS.config.credentials.identityId,
         responseContentType: 'audio/pcm',
         requestContentType: 'audio/x-l16; sample-rate=16000; channel-count=1',
-        inputStream: new Blob([audioData], { type: 'audio/x-l16' }), // Use processed audio blob
+        inputStream: new Blob([audioData], { type: 'audio/x-l16' }),
         sessionState: compressAndB64Encode(sessionState),
       };
 
-      lexRuntimeV2.recognizeUtterance(params, (err, data) => {
-        if (err) {
-          console.error(err);
-        } else {
-          handleLexResponse(data);
-        }
-      });
+      try {
+        const data = await lexRuntimeV2.recognizeUtterance(params).promise();
+        handleLexResponse(data);
+      } catch (err) {
+        console.error('Error recognizing utterance:', err);
+      }
     };
     reader.readAsArrayBuffer(audioBlob);
   };
 
-  const handleLexResponse =  async(data) => {
+  const handleLexResponse = async (data) => {
     console.log('Lex response:', data);
-
+  
     if (data.messages) {
       let botMessages = b64CompressedToObject(data.messages);
       console.log('Bot says:', botMessages);
       botMessages = processLexMessages(botMessages);
-
+  
       setMessages((prevMessages) => [
         ...prevMessages,
-        ...botMessages.map(msg => ({ text: msg.value, sender: 'bot' }))
+        ...botMessages.map((msg) => ({ text: msg.value, sender: 'bot' })),
       ]);
-   // Use Polly to synthesize speech and play audio
-   try {
-    const audioUrl = await synthesizeSpeech(botMessages.map(msg => msg.value).join(' '));
-    const audioElement = new Audio(audioUrl);
-    audioElement.play().catch((error) => {
-      console.error('Error playing audio:', error);
-    });
-  } catch (error) {
-    console.error('Error synthesizing and playing speech:', error);
-  }
-} else {
-  console.error('No messages in response:', data);
-}
-
-if (data.audioStream) {
-  try {
-    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-    const audioUint8Array = new Uint8Array(data.audioStream);
-    const audioBuffer = await audioContext.decodeAudioData(audioUint8Array.buffer);
-
-    const source = audioContext.createBufferSource();
-    source.buffer = audioBuffer;
-    source.connect(audioContext.destination);
-    source.start(0);
-  } catch (error) {
-    console.error('Error handling audio stream:', error);
-  }
-} else {
-  console.error('No audioStream in response:', data);
-}
-
-    
   
-
+      // Use Polly to synthesize speech and play audio
+      try {
+        const audioUrl = await synthesizeSpeech(botMessages.map((msg) => msg.value).join(' '));
+        const audioElement = new Audio(audioUrl);
+        audioElement.play().catch((error) => {
+          console.error('Error playing audio:', error);
+        });
+      } catch (error) {
+        console.error('Error synthesizing and playing speech:', error);
+      }
+    } else {
+      console.error('No messages in response:', data);
+    }
   
+    if (data.audioStream) {
+      try {
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const audioUint8Array = new Uint8Array(data.audioStream);
+        const audioBuffer = await audioContext.decodeAudioData(audioUint8Array.buffer);
+  
+        const source = audioContext.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(audioContext.destination);
+        source.start(0);
+      } catch (error) {
+        console.error('Error handling audio stream:', error);
+      }
+    } else {
+      console.error('No audioStream in response:', data);
+    }
   };
-
+  
   const synthesizeSpeech = async (text) => {
     const params = {
       OutputFormat: 'mp3',
@@ -260,31 +259,31 @@ if (data.audioStream) {
       throw error;
     }
   };
-
+  
   const processLexMessages = (res) => {
     let finalMessages = [];
     if (res.length > 0) {
       res.forEach((mes) => {
         if (mes.contentType === 'PlainText') {
-          const v1Format = { type: mes.contentType, value: mes.content, isLastMessageInGroup: "false" };
+          const v1Format = { type: mes.contentType, value: mes.content, isLastMessageInGroup: 'false' };
           finalMessages.push(v1Format);
         }
       });
     }
     return finalMessages;
   };
-
+  
   useEffect(() => {
     const handleContinueConversation = () => {
       startRecording();
     };
-
+  
     const audioElement = document.querySelector('audio');
     if (audioElement) {
       audioElement.onended = handleContinueConversation;
     }
   }, [messages]);
-
+  
   return (
     <div className="chatbot">
       <div className="chat-window">
@@ -295,9 +294,12 @@ if (data.audioStream) {
         ))}
       </div>
       <div className="input-area">
-        <input type="text" onKeyDown={(e) => {
-          if (e.key === 'Enter') handleSendMessage(e.target.value);
-        }} />
+        <input
+          type="text"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') handleSendMessage(e.target.value);
+          }}
+        />
         <button onClick={isRecording ? stopRecording : startRecording}>
           {isRecording ? 'Stop' : 'Mic'}
         </button>
@@ -305,6 +307,6 @@ if (data.audioStream) {
       <audio id="audioPlayer" />
     </div>
   );
-};
-
-export default Chatbot;
+  };
+  
+  export default Chatbot;
