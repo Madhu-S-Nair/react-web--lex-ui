@@ -17,10 +17,12 @@ const b64CompressedToObject = (src) => {
 const Chatbot = () => {
   const [messages, setMessages] = useState([]);
   const [isRecording, setIsRecording] = useState(false);
-  const [audioElement, setAudioElement] = useState(null);
+  const [buttonLabel, setButtonLabel] = useState('Speak');
+  const [isProcessing, setIsProcessing] = useState(false);
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
   const sessionAttributes = useRef({});
+  const audioElementRef = useRef(null);
 
   const handleSendMessage = async (inputText) => {
     if (inputText.trim() === '') return;
@@ -176,11 +178,11 @@ const Chatbot = () => {
     const reader = new FileReader();
     reader.onload = async () => {
       const audioData = reader.result;
-  
+
       const sessionState = {
         sessionAttributes: sessionAttributes.current,
       };
-  
+
       const params = {
         botAliasId: LEX_BOT_ALIAS,
         botId: LEX_BOT_NAME,
@@ -191,8 +193,10 @@ const Chatbot = () => {
         inputStream: new Blob([audioData], { type: 'audio/lpcm' }),
         sessionState: compressAndB64Encode(sessionState),
       };
-  
+
       try {
+        setButtonLabel('Processing');
+        setIsProcessing(true);
         const start = performance.now();
         const data = await lexRuntimeV2.recognizeUtterance(params).promise();
         const end = performance.now();
@@ -204,7 +208,7 @@ const Chatbot = () => {
     };
     reader.readAsArrayBuffer(audioBlob);
   };
-  
+
   const handleLexResponse = async (data) => {
     console.log('Lex response:', data);
   
@@ -222,12 +226,20 @@ const Chatbot = () => {
       try {
         const audioUrl = await synthesizeSpeech(botMessages.map((msg) => msg.value).join(' '));
         const audioElement = new Audio(audioUrl);
-        setAudioElement(audioElement); // Store the audio element in the state
+        audioElementRef.current = audioElement;
         audioElement.play().catch((error) => {
           console.error('Error playing audio:', error);
         });
+        audioElement.onended = () => {
+          setButtonLabel('Speak');
+          setIsProcessing(false);
+        };
+        setButtonLabel('Stop');
+        setIsProcessing(false);
       } catch (error) {
         console.error('Error synthesizing and playing speech:', error);
+        setButtonLabel('Speak');
+        setIsProcessing(false);
       }
     } else {
       console.error('No messages in response:', data);
@@ -238,7 +250,7 @@ const Chatbot = () => {
         const audioContext = new (window.AudioContext || window.webkitAudioContext)();
         const audioUint8Array = new Uint8Array(data.audioStream);
         const audioBuffer = await audioContext.decodeAudioData(audioUint8Array.buffer);
-
+  
         const source = audioContext.createBufferSource();
         source.buffer = audioBuffer;
         source.connect(audioContext.destination);
@@ -250,14 +262,14 @@ const Chatbot = () => {
       console.error('No audioStream in response:', data);
     }
   };
-
+  
   const synthesizeSpeech = async (text) => {
     const params = {
       OutputFormat: 'mp3',
       Text: text,
       VoiceId: 'Joanna', // You can choose any available voice
     };
-
+  
     try {
       const start = performance.now();
       const data = await polly.synthesizeSpeech(params).promise();
@@ -271,7 +283,7 @@ const Chatbot = () => {
       throw error;
     }
   };
-
+  
   const processLexMessages = (res) => {
     let finalMessages = [];
     if (res.length > 0) {
@@ -284,25 +296,43 @@ const Chatbot = () => {
     }
     return finalMessages;
   };
-
-  const stopAudioPlayback = () => {
-    if (audioElement) {
-      audioElement.pause();
-      audioElement.currentTime = 0;
-    }
-  };
-
+  
   useEffect(() => {
     const handleContinueConversation = () => {
       startRecording();
     };
-
+  
     const audioElement = document.querySelector('audio');
     if (audioElement) {
       audioElement.onended = handleContinueConversation;
     }
   }, [messages]);
-
+  
+  const handleButtonClick = () => {
+    if (isProcessing) {
+      if (audioElementRef.current) {
+        audioElementRef.current.pause();
+        audioElementRef.current.currentTime = 0;
+        setButtonLabel('Speak');
+        setIsProcessing(false);
+      }
+    } else {
+      if (!isRecording) {
+        setButtonLabel('Recording...');
+        startRecording();
+        setTimeout(() => {
+          if (isRecording) {
+            stopRecording();
+            setButtonLabel('Processing');
+          }
+        }, 5000); // Record for max 5 seconds
+      } else {
+        stopRecording();
+        setButtonLabel('Processing');
+      }
+    }
+  };
+  
   return (
     <div className="chatbot">
       <div className="chat-window">
@@ -319,14 +349,13 @@ const Chatbot = () => {
             if (e.key === 'Enter') handleSendMessage(e.target.value);
           }}
         />
-        <button onClick={isRecording ? stopRecording : startRecording}>
-          {isRecording ? 'Stop' : 'Mic'}
+        <button onClick={handleButtonClick} disabled={isProcessing}>
+          {buttonLabel}
         </button>
-        <button onClick={stopAudioPlayback}>Stop Polly</button>
       </div>
-      <audio id="audioPlayer" />
+      <audio id="audioPlayer" ref={audioElementRef} />
     </div>
   );
-}
-
-export default Chatbot;
+  };
+  
+  export default Chatbot;
