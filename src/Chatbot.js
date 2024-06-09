@@ -203,64 +203,54 @@ const Chatbot = () => {
     reader.readAsArrayBuffer(audioBlob);
   };
 
-  const handleLexResponse = (data) => {
+  const handleLexResponse = async (data) => {
     console.log('Lex response:', data);
-
+  
     if (data.messages) {
-      let botMessages = b64CompressedToObject(data.messages);
-      console.log('Bot says:', botMessages);
-      botMessages = processLexMessages(botMessages);
-      synthesizeSpeech(botMessages.map(msg => msg.value).join(' '));
-
+      let botMessage = b64CompressedToObject(data.messages);
+      console.log('Bot says:', botMessage);
+      botMessage = processLexMessages(botMessage);
+  
       setMessages((prevMessages) => [
         ...prevMessages,
-        ...botMessages.map(msg => ({ text: msg.value, sender: 'bot' }))
+        { text: botMessage, sender: 'bot' },
       ]);
     } else {
       console.error('No messages in response:', data);
     }
-
+  
     if (data.audioStream) {
-      // Assuming audioStream is a Uint8Array directly
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
       const audioUint8Array = new Uint8Array(data.audioStream);
-      const audioBlob = new Blob([audioUint8Array.buffer], { type: 'audio/ogg' });
+      const audioBuffer = await audioContext.decodeAudioData(audioUint8Array.buffer);
   
-      // Debugging: Log the Blob and check its type and size
-      console.log('Audio Blob:', audioBlob);
-  
-      const audioUrl = URL.createObjectURL(audioBlob);
-      
-      // Debugging: Log the URL to check if it's correctly formed
-      console.log('Audio URL:', audioUrl);
-  
-      // Creating an Audio element and playing the audio
-      const audioElement = new Audio(audioUrl);
-      audioElement.play().catch(error => {
-        console.error('Error playing audio:', error);
-      });
+      const source = audioContext.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(audioContext.destination);
+      source.start(0);
     } else {
       console.error('No audioStream in response:', data);
     }
   };
 
-  const synthesizeSpeech = (text) => {
-    const params = {
-      OutputFormat: 'mp3',
-      Text: text,
-      VoiceId: 'Joanna',
-    };
+  // const synthesizeSpeech = (text) => {
+  //   const params = {
+  //     OutputFormat: 'mp3',
+  //     Text: text,
+  //     VoiceId: 'Joanna',
+  //   };
 
-    polly.synthesizeSpeech(params, (err, data) => {
-      if (err) {
-        console.error(err);
-      } else if (data && data.AudioStream instanceof Buffer) {
-        const audioBlob = new Blob([data.AudioStream], { type: 'audio/mpeg' });
-        const audioUrl = URL.createObjectURL(audioBlob);
-        const audioElement = new Audio(audioUrl);
-        audioElement.play();
-      }
-    });
-  };
+  //   polly.synthesizeSpeech(params, (err, data) => {
+  //     if (err) {
+  //       console.error(err);
+  //     } else if (data && data.AudioStream instanceof Buffer) {
+  //       const audioBlob = new Blob([data.AudioStream], { type: 'audio/mpeg' });
+  //       const audioUrl = URL.createObjectURL(audioBlob);
+  //       const audioElement = new Audio(audioUrl);
+  //       audioElement.play();
+  //     }
+  //   });
+  // };
 
   const processLexMessages = (res) => {
     let finalMessages = [];
