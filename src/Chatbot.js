@@ -102,6 +102,10 @@ const Chatbot = () => {
   };
 
   const startRecording = () => {
+    if (audioElementRef.current) {
+      audioElementRef.current.pause();
+      audioElementRef.current.currentTime = 0;
+    }
     setIsRecording(true);
     setButtonLabel('Listening...');
     logButtonStateChange('Listening...');
@@ -161,9 +165,6 @@ const Chatbot = () => {
       handleVoiceMessage(l16Blob);
     } catch (err) {
       console.error('Error processing and sending audio:', err);
-      setButtonLabel('Speak');
-      setIsProcessing(false);
-      logButtonStateChange('Speak');
     }
   };
 
@@ -426,23 +427,22 @@ const Chatbot = () => {
           value={inputText}
           onChange={handleInputChange}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') handleSendMessage();
+            if (e.key === 'Enter') handleSendMessage(e.target.value);
           }}
           disabled={isRecording || isProcessing}
         />
-        <button onClick={handleSendMessage} disabled={isRecording || isProcessing || inputText.trim() === ''}>
+        <button onClick={handleSendMessage} disabled={isProcessing || inputText.trim() === ''}>
           Send
         </button>
         <button onClick={handleButtonClick} disabled={isProcessing}>
           {buttonLabel}
         </button>
-  
         {errorMessage && <div className="error-message">{errorMessage}</div>}
       </div>
       <audio id="audioPlayer" ref={audioElementRef} />
-      <div className="decibel-meter">
+      {/* <div className="decibel-meter">
         Decibel Level: {decibelLevel.toFixed(2)} dB
-      </div>
+      </div> */}
     </div>
   );
   };
