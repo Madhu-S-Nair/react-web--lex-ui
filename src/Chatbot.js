@@ -84,24 +84,18 @@ const Chatbot = () => {
   };
 
   const compressAndB64Encode = (src) => {
-    const start = performance.now();
     const result = pako.gzip(JSON.stringify(src));
-    const end = performance.now();
-    console.log(`compressAndB64Encode took ${end - start} ms`);
     return btoa(String.fromCharCode(...new Uint8Array(result)));
   };
 
   const processAndSendAudio = async (audioBlob) => {
     try {
-      const start = performance.now();
       const arrayBuffer = await audioBlob.arrayBuffer();
       const audioContext = new (window.AudioContext || window.webkitAudioContext)();
       const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
 
       const resampledBuffer = await resampleAudio(audioBuffer, 8000); // Lower sample rate to 8000 Hz
       const l16Blob = audioBufferToWav(resampledBuffer);
-      const end = performance.now();
-      console.log(`processAndSendAudio took ${end - start} ms`);
 
       handleVoiceMessage(l16Blob);
     } catch (err) {
@@ -110,7 +104,6 @@ const Chatbot = () => {
   };
 
   const resampleAudio = (audioBuffer, targetSampleRate) => {
-    const start = performance.now();
     return new Promise((resolve) => {
       const numChannels = audioBuffer.numberOfChannels;
       const length = audioBuffer.length * targetSampleRate / audioBuffer.sampleRate;
@@ -121,16 +114,11 @@ const Chatbot = () => {
 
       bufferSource.connect(offlineContext.destination);
       bufferSource.start(0);
-      offlineContext.startRendering().then((resampledBuffer) => {
-        const end = performance.now();
-        console.log(`resampleAudio took ${end - start} ms`);
-        resolve(resampledBuffer);
-      });
+      offlineContext.startRendering().then(resolve);
     });
   };
 
   const audioBufferToWav = (audioBuffer) => {
-    const start = performance.now();
     let numOfChan = audioBuffer.numberOfChannels,
         length = audioBuffer.length * numOfChan * 2 + 44,
         buffer = new ArrayBuffer(length),
@@ -170,9 +158,6 @@ const Chatbot = () => {
       offset++; // next source sample
     }
 
-    const end = performance.now();
-    console.log(`audioBufferToWav took ${end - start} ms`);
-
     return new Blob([buffer], { type: 'audio/lpcm' });
 
     function setUint16(data) {
@@ -190,11 +175,11 @@ const Chatbot = () => {
     const reader = new FileReader();
     reader.onload = async () => {
       const audioData = reader.result;
-
+  
       const sessionState = {
         sessionAttributes: sessionAttributes.current,
       };
-
+  
       const params = {
         botAliasId: LEX_BOT_ALIAS,
         botId: LEX_BOT_NAME,
@@ -205,7 +190,7 @@ const Chatbot = () => {
         inputStream: new Blob([audioData], { type: 'audio/lpcm' }),
         sessionState: compressAndB64Encode(sessionState),
       };
-
+  
       try {
         const start = performance.now();
         const data = await lexRuntimeV2.recognizeUtterance(params).promise();
@@ -218,124 +203,119 @@ const Chatbot = () => {
     };
     reader.readAsArrayBuffer(audioBlob);
   };
-
+  
   const handleLexResponse = async (data) => {
     console.log('Lex response:', data);
-
+  
     if (data.messages) {
-        let botMessages = b64CompressedToObject(data.messages);
-        console.log('Bot says:', botMessages);
-        botMessages = processLexMessages(botMessages);
-
-        setMessages(prevMessages => [
-            ...prevMessages,
-            ...botMessages.map(msg => ({ text: msg.value, sender: 'bot' }))
-        ]);
-
-        try {
-            const start = performance.now();
-            const audioUrl = await synthesizeSpeech(botMessages.map(msg => msg.value).join(' '));
-            const end = performance.now();
-            console.log(`synthesizeSpeech took ${end - start} ms`);
-
-            const audioElement = new Audio(audioUrl);
-            audioElement.play().catch((error) => {
-                console.error('Error playing audio:', error);
-            });
-        } catch (error) {
-            console.error('Error synthesizing and playing speech:', error);
-        }
+      let botMessages = b64CompressedToObject(data.messages);
+      console.log('Bot says:', botMessages);
+      botMessages = processLexMessages(botMessages);
+  
+      setMessages((prevMessages) => [
+        ...prevMessages,
+        ...botMessages.map((msg) => ({ text: msg.value, sender: 'bot' })),
+      ]);
+  
+      // Use Polly to synthesize speech and play audio
+      try {
+        const audioUrl = await synthesizeSpeech(botMessages.map((msg) => msg.value).join(' '));
+        const audioElement = new Audio(audioUrl);
+        audioElement.play().catch((error) => {
+          console.error('Error playing audio:', error);
+        });
+      } catch (error) {
+        console.error('Error synthesizing and playing speech:', error);
+      }
     } else {
-        console.error('No messages in response:', data);
+      console.error('No messages in response:', data);
     }
-
+  
     if (data.audioStream) {
-        try {
-            const start = performance.now();
-            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            const audioUint8Array = new Uint8Array(data.audioStream);
-            const audioBuffer = await audioContext.decodeAudioData(audioUint8Array.buffer);
-            const end = performance.now();
-            console.log(`decodeAudioData took ${end - start} ms`);
-
-            const source = audioContext.createBufferSource();
-            source.buffer = audioBuffer;
-            source.connect(audioContext.destination);
-            source.start(0);
-        } catch (error) {
-            console.error('Error handling audio stream:', error);
-        }
+      try {
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const audioUint8Array = new Uint8Array(data.audioStream);
+        const audioBuffer = await audioContext.decodeAudioData(audioUint8Array.buffer);
+  
+        const source = audioContext.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(audioContext.destination);
+        source.start(0);
+      } catch (error) {
+        console.error('Error handling audio stream:', error);
+      }
     } else {
-        console.error('No audioStream in response:', data);
+      console.error('No audioStream in response:', data);
     }
-};
-
-const synthesizeSpeech = async (text) => {
+  };
+  
+  const synthesizeSpeech = async (text) => {
     const params = {
-        OutputFormat: 'mp3',
-        Text: text,
-        VoiceId: 'Joanna', // You can choose any available voice
+      OutputFormat: 'mp3',
+      Text: text,
+      VoiceId: 'Joanna', // You can choose any available voice
     };
-
+  
     try {
-        const start = performance.now();
-        const data = await polly.synthesizeSpeech(params).promise();
-        const end = performance.now();
-        console.log(`polly.synthesizeSpeech took ${end - start} ms`);
-
-        const audioBlob = new Blob([data.AudioStream], { type: 'audio/mpeg' });
-        const audioUrl = URL.createObjectURL(audioBlob);
-        return audioUrl;
+      const start = performance.now();
+      const data = await polly.synthesizeSpeech(params).promise();
+      const end = performance.now();
+      console.log(`polly.synthesizeSpeech took ${end - start} ms`);
+      const audioBlob = new Blob([data.AudioStream], { type: 'audio/mpeg' });
+      const audioUrl = URL.createObjectURL(audioBlob);
+      return audioUrl;
     } catch (error) {
-        console.error('Error synthesizing speech:', error);
-        throw error;
+      console.error('Error synthesizing speech:', error);
+      throw error;
     }
-};
-
-const processLexMessages = (res) => {
+  };
+  
+  const processLexMessages = (res) => {
     let finalMessages = [];
     if (res.length > 0) {
-        res.forEach((mes) => {
-            if (mes.contentType === 'PlainText') {
-                const v1Format = { type: mes.contentType, value: mes.content, isLastMessageInGroup: "false" };
-                finalMessages.push(v1Format);
-            }
-        });
+      res.forEach((mes) => {
+        if (mes.contentType === 'PlainText') {
+          const v1Format = { type: mes.contentType, value: mes.content, isLastMessageInGroup: 'false' };
+          finalMessages.push(v1Format);
+        }
+      });
     }
     return finalMessages;
-};
-
-useEffect(() => {
+  };
+  
+  useEffect(() => {
     const handleContinueConversation = () => {
-        startRecording();
+      startRecording();
     };
-
+  
     const audioElement = document.querySelector('audio');
     if (audioElement) {
-        audioElement.onended = handleContinueConversation;
+      audioElement.onended = handleContinueConversation;
     }
-}, [messages]);
-
-return (
+  }, [messages]);
+  
+  return (
     <div className="chatbot">
-        <div className="chat-window">
-            {messages.map((msg, index) => (
-                <div key={index} className={`messages ${msg.sender}`}>
-                    {msg.text}
-                </div>
-            ))}
-        </div>
-        <div className="input-area">
-            <input type="text" onKeyDown={(e) => {
-                if (e.key === 'Enter') handleSendMessage(e.target.value);
-            }} />
-            <button onClick={isRecording ? stopRecording : startRecording}>
-                {isRecording ? 'Stop' : 'Mic'}
-            </button>
-        </div>
-        <audio id="audioPlayer" />
+      <div className="chat-window">
+        {messages.map((msg, index) => (
+          <div key={index} className={`messages ${msg.sender}`}>
+            {msg.text}
+          </div>
+        ))}
+      </div>
+      <div className="input-area">
+        <input
+          type="text"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') handleSendMessage(e.target.value);
+          }}
+        />
+        <button onClick={isRecording ? stopRecording : startRecording}>
+          {isRecording ? 'Stop' : 'Mic'}
+        </button>
+      </div>
+      <audio id="audioPlayer" />
     </div>
-);
-};
-
-export default Chatbot;
+  );
+}
+  export default Chatbot;
