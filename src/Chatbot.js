@@ -4,15 +4,14 @@ import pako from 'pako';
 
 const lexRuntimeV2 = new AWS.LexRuntimeV2();
 
-const b64CompressedToObject= (src) => {
+const b64CompressedToObject = (src) => {
   const binaryString = atob(src); // Decode base64 string
   const charArray = binaryString.split('').map(char => char.charCodeAt(0)); // Convert to byte array
   const byteArray = new Uint8Array(charArray); // Convert to Uint8Array
   const decompressedData = pako.ungzip(byteArray); // Decompress using pako
   const jsonString = new TextDecoder().decode(decompressedData); // Decode to string
   return JSON.parse(jsonString); // Parse JSON string to object
-}
-
+};
 
 const Chatbot = () => {
   const [messages, setMessages] = useState([]);
@@ -206,14 +205,14 @@ const Chatbot = () => {
   const handleLexResponse = (data) => {
     console.log('Lex response:', data);
 
-    if (data.messages ) {
-      let  botMessage = b64CompressedToObject(data.messages);
-      console.log('Bot says:', botMessage);
-      botMessage = processLexMessages(botMessage)
-
+    if (data.messages) {
+      let botMessages = b64CompressedToObject(data.messages);
+      console.log('Bot says:', botMessages);
+      botMessages = processLexMessages(botMessages);
+      
       setMessages((prevMessages) => [
         ...prevMessages,
-        { text: botMessage, sender: 'bot' }
+        ...botMessages.map(msg => ({ text: msg.value, sender: 'bot' }))
       ]);
     } else {
       console.error('No messages in response:', data);
@@ -232,27 +231,16 @@ const Chatbot = () => {
 
   const processLexMessages = (res) => {
     let finalMessages = [];
-    if (res.messages && res.messages.length > 0) {
-      res.messages.forEach((mes) => {
-        if (mes.contentType === 'ImageResponseCard') {
-          res.responseCardLexV2 = res.responseCardLexV2 ? res.responseCardLexV2 : [];
-          const newCard = {};
-          newCard.version = '1';
-          newCard.contentType = 'application/vnd.amazonaws.card.generic';
-          newCard.genericAttachments = [];
-          newCard.genericAttachments.push(mes.imageResponseCard);
-          res.responseCardLexV2.push(newCard);
-        } else {
-          if (mes.contentType) {
-            const v1Format = { type: mes.contentType, value: mes.content, isLastMessageInGroup: "false" };
-            finalMessages.push(v1Format);
-          }
+    if (res.length > 0) {
+      res.forEach((mes) => {
+        if (mes.contentType === 'PlainText') {
+          const v1Format = { type: mes.contentType, value: mes.content, isLastMessageInGroup: "false" };
+          finalMessages.push(v1Format);
         }
       });
     }
     return finalMessages;
   };
-
 
   useEffect(() => {
     const handleContinueConversation = () => {
