@@ -1,13 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import AWS from 'aws-sdk';
+import { AWS, LEX_BOT_NAME, LEX_BOT_ALIAS, LEX_BOT_LOCALE } from './aws-config';
 import { v4 as uuidv4 } from 'uuid';
-
-AWS.config.update({
-  region: 'your-region',
-  credentials: new AWS.CognitoIdentityCredentials({
-    IdentityPoolId: 'your-identity-pool-id',
-  }),
-});
+import pako from 'pako';
 
 const lexRuntimeV2 = new AWS.LexRuntimeV2();
 
@@ -16,7 +10,6 @@ const Chatbot = () => {
   const [isRecording, setIsRecording] = useState(false);
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
-
   const sessionAttributes = useRef({});
 
   const handleSendMessage = async (inputText) => {
@@ -26,9 +19,9 @@ const Chatbot = () => {
     setMessages([...messages, newMessage]);
 
     const params = {
-      botAliasId: 'your-bot-alias-id',
-      botId: 'your-bot-id',
-      localeId: 'your-bot-locale-id',
+      botAliasId: LEX_BOT_ALIAS,
+      botId: LEX_BOT_NAME,
+      localeId: LEX_BOT_LOCALE,
       sessionId: AWS.config.credentials.identityId,
       text: inputText,
       sessionState: {
@@ -63,7 +56,7 @@ const Chatbot = () => {
 
         mediaRecorder.onstop = () => {
           const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
-          handleVoiceMessage(audioBlob);
+          playAudioBeforeSending(audioBlob);
           audioChunksRef.current = [];
         };
 
@@ -78,55 +71,93 @@ const Chatbot = () => {
     }
   };
 
+  const compressAndB64Encode = (src) => {
+    let result = pako.gzip(JSON.stringify(src));
+    return btoa(String.fromCharCode(...new Uint8Array(result)));
+  };
+
+  const playAudioBeforeSending = (audioBlob) => {
+    const audioUrl = URL.createObjectURL(audioBlob);
+    const audioElement = document.createElement('audio');
+    audioElement.src = audioUrl;
+    audioElement.play();
+    audioElement.onended = () => {
+      handleVoiceMessage(audioBlob);
+    };
+  };
+
   const handleVoiceMessage = (audioBlob) => {
     const reader = new FileReader();
     reader.onload = () => {
+      const mediaType = audioBlob.type;
       const audioData = new Uint8Array(reader.result);
+      let contentType = mediaType;
+      let offset = 0;
+      let acceptFormat = 'audio/mpeg';
+
+      if (mediaType.startsWith('audio/wav')) {
+        contentType = 'audio/x-l16; sample-rate=16000; channel-count=1';
+      } else if (mediaType.startsWith('audio/ogg')) {
+        contentType =
+          'audio/x-cbr-opus-with-preamble; bit-rate=32000;' +
+          ` frame-size-milliseconds=20; preamble-size=${offset}`;
+      } else {
+        console.warn('unknown media type in lex client');
+      }
+      const sessionState = {
+        sessionAttributes: sessionAttributes.current
+      };
+
       const params = {
-        botAliasId: 'your-bot-alias-id',
-        botId: 'your-bot-id',
-        localeId: 'your-bot-locale-id',
+        botAliasId: LEX_BOT_ALIAS,
+        botId: LEX_BOT_NAME,
+        localeId: LEX_BOT_LOCALE,
         sessionId: AWS.config.credentials.identityId,
+        responseContentType: acceptFormat,
+        requestContentType: contentType,
         inputStream: audioData,
-        contentType: 'audio/wav',
-        sessionState: {
-          sessionAttributes: sessionAttributes.current,
-        },
+        sessionState: compressAndB64Encode(sessionState),
       };
 
       lexRuntimeV2.recognizeUtterance(params, (err, data) => {
         if (err) {
           console.error(err);
-        } else if (data) {
-          sessionAttributes.current = data.sessionState.sessionAttributes;
-          const userMessage = {
-            text: data.inputTranscript,
-            sender: 'user',
-          };
-          const botMessages = data.messages.map(msg => ({
-            text: msg.content,
-            sender: 'bot',
-          }));
-          setMessages([...messages, userMessage, ...botMessages]);
-
-          // Play bot response audio
-          const audioBlob = new Blob([data.audioStream], { type: 'audio/mpeg' });
-          const audioUrl = URL.createObjectURL(audioBlob);
-          const audio = new Audio(audioUrl);
-          audio.play();
+        } else {
+          handleLexResponse(data);
         }
       });
     };
     reader.readAsArrayBuffer(audioBlob);
   };
 
+  const handleLexResponse = (data) => {
+    console.log('Lex response:', data);
+    if (data.messages && Array.isArray(data.messages)) {
+      const botMessages = data.messages.map((message) => ({
+        text: message.content,
+        sender: 'bot',
+      }));
+      setMessages(prevMessages => [...prevMessages, ...botMessages]);
+    } else {
+      console.error('No messages in response:', data);
+    }
+
+    if (data.audioStream) {
+      const audioBlob = new Blob([data.audioStream], { type: 'audio/mpeg' });
+      const audioUrl = URL.createObjectURL(audioBlob);
+      const audioElement = document.getElementById('audioPlayer');
+      audioElement.src = audioUrl;
+      audioElement.play();
+    } else {
+      console.error('No audioStream in response:', data);
+    }
+  };
+
   useEffect(() => {
     const handleContinueConversation = () => {
-      // Automatically start recording again after bot's response
       startRecording();
     };
 
-    // Assuming there's a way to detect when the bot has finished speaking
     const audioElement = document.querySelector('audio');
     if (audioElement) {
       audioElement.onended = handleContinueConversation;
@@ -137,7 +168,7 @@ const Chatbot = () => {
     <div className="chatbot">
       <div className="chat-window">
         {messages.map((msg, index) => (
-          <div key={index} className={`message ${msg.sender}`}>
+          <div key={index} className={`messages ${msg.sender}`}>
             {msg.text}
           </div>
         ))}
@@ -150,6 +181,7 @@ const Chatbot = () => {
           {isRecording ? 'Stop' : 'Mic'}
         </button>
       </div>
+      <audio id="audioPlayer" controls style={{ display: 'none' }}></audio>
     </div>
   );
 };
