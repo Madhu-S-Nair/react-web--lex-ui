@@ -40,3 +40,12 @@
   border-radius: 5px;
   cursor: pointer;
 }
+.messages.user-message {
+  text-align: right;
+  /* Additional styling */
+}
+
+.messages.bot-message {
+  text-align: left;
+  /* Additional styling */
+}

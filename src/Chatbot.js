@@ -429,28 +429,31 @@ const Chatbot = () => {
   
   return (
     <div className="chatbot">
-      <div className="chat-window">
-        {messages.map((msg, index) => (
-          <div key={index} className={`messages ${msg.sender}`}>
-            {msg.text}
-          </div>
-        ))}
-      </div>
-      <div className="input-area">
-       
-        <button onClick={handleButtonClick} disabled={isProcessing}>
-          {buttonLabel}
-        </button>
-        <button onClick={stopAllProcesses} disabled={!isRecording && !isProcessing && buttonLabel !== 'Listening...'}>
-          Stop
-        </button>
-        {errorMessage && <div className="error-message">{errorMessage}</div>}
-      </div>
-      <audio id="audioPlayer" ref={audioElementRef} />
-      <div className="decibel-meter">
-        Decibel Level: {decibelLevel.toFixed(2)} dB
-      </div>
+    <div className="chat-window">
+      {messages.map((msg, index) => (
+        <div
+          key={index}
+          className={`messages ${msg.sender === 'user' ? 'user-message' : 'bot-message'}`}
+        >
+          {msg.text}
+        </div>
+      ))}
     </div>
+    <div className="input-area">
+     
+      <button onClick={() => handleButtonClick(setIsRecording, setIsProcessing, setButtonLabel, logButtonStateChange, audioElementRef)} disabled={isProcessing}>
+        {buttonLabel}
+      </button>
+      <button onClick={() => stopAllProcesses(setIsRecording, setIsProcessing, setButtonLabel, logButtonStateChange, audioElementRef)} disabled={!isRecording && !isProcessing && buttonLabel !== 'Listening...'}>
+        Stop
+      </button>
+      {errorMessage && <div className="error-message">{errorMessage}</div>}
+    </div>
+    <audio id="audioPlayer" ref={audioElementRef} />
+    {/* <div className="decibel-meter">
+      Decibel Level: {decibelLevel.toFixed(2)} dB
+    </div> */}
+  </div>
   );
   };
   
