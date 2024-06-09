@@ -19,7 +19,9 @@ const Chatbot = () => {
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [buttonLabel, setButtonLabel] = useState('Speak');
+  const [decibelLevel, setDecibelLevel] = useState(0);
   const [errorMessage, setErrorMessage] = useState('');
+  const [inputText, setInputText] = useState('');
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
   const audioElementRef = useRef(null);
@@ -27,8 +29,8 @@ const Chatbot = () => {
   const audioContextRef = useRef(null);
   const analyserRef = useRef(null);
 
-  const logButtonStateChange = (newState) => {
-    console.log(`Button state changed to "${newState}" at ${new Date().toISOString()}`);
+  const logButtonStateChange = (state) => {
+    console.log(`Button state changed to "${state}" at ${new Date().toISOString()}`);
   };
 
   useEffect(() => {
@@ -71,6 +73,7 @@ const Chatbot = () => {
         sender: 'bot',
       }));
       setMessages(prevMessages => [...prevMessages, ...botMessages]);
+      setInputText('');
     } catch (err) {
       console.error(err);
     }
@@ -78,8 +81,8 @@ const Chatbot = () => {
 
   const startRecording = () => {
     setIsRecording(true);
-    logButtonStateChange('Listening');
     setButtonLabel('Listening...');
+    logButtonStateChange('Listening...');
     navigator.mediaDevices.getUserMedia({ audio: true })
       .then(stream => {
         const audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -107,25 +110,16 @@ const Chatbot = () => {
         };
 
         mediaRecorder.start();
-
-        
-      })
-      .catch(error => {
-        console.error('Error accessing microphone:', error);
-        setErrorMessage('Error accessing microphone');
-        setButtonLabel('Speak');
-        setIsRecording(false);
-        setIsProcessing(false);
       });
   };
 
   const stopRecording = () => {
     setIsRecording(false);
-    logButtonStateChange('Processing');
-    setButtonLabel('Processing');
     if (mediaRecorderRef.current) {
       mediaRecorderRef.current.stop();
     }
+    setButtonLabel('Processing');
+    logButtonStateChange('Processing');
   };
 
   const compressAndB64Encode = (src) => {
@@ -145,9 +139,6 @@ const Chatbot = () => {
       handleVoiceMessage(l16Blob);
     } catch (err) {
       console.error('Error processing and sending audio:', err);
-      setErrorMessage('Error processing audio');
-      setButtonLabel('Speak');
-      setIsProcessing(false);
     }
   };
 
@@ -222,192 +213,206 @@ const Chatbot = () => {
   const handleVoiceMessage = (audioBlob) => {
     const reader = new FileReader();
     reader.onload = async () => {
-      const audioData = reader.result;
+        const audioData = reader.result;
 
-      const sessionState = {
-        sessionAttributes: sessionAttributes.current,
-      };
+        const sessionState = {
+            sessionAttributes: sessionAttributes.current,
+        };
 
-      const params = {
-        botAliasId: LEX_BOT_ALIAS,
-        botId: LEX_BOT_NAME,
-        localeId: LEX_BOT_LOCALE,
-        sessionId: AWS.config.credentials.identityId,
-        responseContentType: 'audio/pcm',
-        requestContentType: 'audio/lpcm; sample-rate=8000; sample-size-bits=16; channel-count=1; is-big-endian=false',
-        inputStream: new Blob([audioData], { type: 'audio/lpcm' }),
-        sessionState: compressAndB64Encode(sessionState),
-      };
+        const params = {
+            botAliasId: LEX_BOT_ALIAS,
+            botId: LEX_BOT_NAME,
+            localeId: LEX_BOT_LOCALE,
+            sessionId: AWS.config.credentials.identityId,
+            responseContentType: 'audio/pcm',
+            requestContentType: 'audio/lpcm; sample-rate=8000; sample-size-bits=16; channel-count=1; is-big-endian=false',
+            inputStream: new Blob([audioData], { type: 'audio/lpcm' }),
+            sessionState: compressAndB64Encode(sessionState),
+        };
 
-      try {
-        const start = performance.now();
-        const data = await lexRuntimeV2.recognizeUtterance(params).promise();
-        const end = performance.now();
-        console.log(`lexRuntimeV2.recognizeUtterance took ${end - start} ms`);
-        handleLexResponse(data);
-      } catch (err) {
-        console.error('Error recognizing utterance:', err);
-        setErrorMessage('Error recognizing utterance');
-        setButtonLabel('Speak');
-        setIsProcessing(false);
-      }
+        try {
+            const start = performance.now();
+            const data = await lexRuntimeV2.recognizeUtterance(params).promise();
+            const end = performance.now();
+            console.log(`lexRuntimeV2.recognizeUtterance took ${end - start} ms`);
+            handleLexResponse(data);
+        } catch (err) {
+            console.error('Error recognizing utterance:', err);
+            setErrorMessage('Error recognizing utterance');
+            setButtonLabel('Speak');
+            setIsProcessing(false);
+            logButtonStateChange('Speak');
+        }
     };
     reader.readAsArrayBuffer(audioBlob);
-  };
+};
 
-  const handleLexResponse = async (data) => {
-    console.log('Lex response:', data);
+const handleLexResponse = async (data) => {
+  console.log('Lex response:', data);
 
-    if (data.messages) {
-        let botMessages = b64CompressedToObject(data.messages);
-        console.log('Bot says:', botMessages);
-        botMessages = processLexMessages(botMessages);
+  if (data.messages) {
+      let botMessages = b64CompressedToObject(data.messages);
+      console.log('Bot says:', botMessages);
+      botMessages = processLexMessages(botMessages);
 
-        setMessages((prevMessages) => [
-            ...prevMessages,
-            ...botMessages.map((msg) => ({ text: msg.value, sender: 'bot' })),
-        ]);
+      setMessages((prevMessages) => [
+          ...prevMessages,
+          ...botMessages.map((msg) => ({ text: msg.value, sender: 'bot' })),
+      ]);
 
-        // Use Polly to synthesize speech and play audio
-        try {
-            const audioUrl = await synthesizeSpeech(botMessages.map((msg) => msg.value).join(' '));
-            const audioElement = new Audio(audioUrl);
-            audioElementRef.current = audioElement;
-            audioElement.play().catch((error) => {
-                console.error('Error playing audio:', error);
-            });
-            audioElement.onended = () => {
-                setButtonLabel('Speak');
-                setIsProcessing(false);
-                logButtonStateChange('Speak');
-            };
-        } catch (error) {
-            console.error('Error synthesizing and playing speech:', error);
-            setErrorMessage('Error synthesizing and playing speech');
-            setButtonLabel('Speak');
-            setIsProcessing(false);
-            logButtonStateChange('Speak');
-        }
-    } else {
-        console.error('No messages in response:', data);
-        setErrorMessage('No messages in response');
-        setButtonLabel('Speak');
-        setIsProcessing(false);
-        logButtonStateChange('Speak');
-    }
+      // Use Polly to synthesize speech and play audio
+      try {
+          const audioUrl = await synthesizeSpeech(botMessages.map((msg) => msg.value).join(' '));
+          const audioElement = new Audio(audioUrl);
+          audioElementRef.current = audioElement;
+          audioElement.play().catch((error) => {
+              console.error('Error playing audio:', error);
+          });
+          audioElement.onended = () => {
+              setButtonLabel('Speak');
+              setIsProcessing(false);
+              logButtonStateChange('Speak');
+          };
+      } catch (error) {
+          console.error('Error synthesizing and playing speech:', error);
+          setErrorMessage('Error synthesizing and playing speech');
+          setButtonLabel('Speak');
+          setIsProcessing(false);
+          logButtonStateChange('Speak');
+      }
+  } else {
+      console.error('No messages in response:', data);
+      setErrorMessage('No messages in response');
+      setButtonLabel('Speak');
+      setIsProcessing(false);
+      logButtonStateChange('Speak');
+  }
 
-    if (data.audioStream) {
-        try {
-            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            const audioUint8Array = new Uint8Array(data.audioStream);
-            const audioBuffer = await audioContext.decodeAudioData(audioUint8Array.buffer);
+  if (data.audioStream) {
+      try {
+          const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+          const audioUint8Array = new Uint8Array(data.audioStream);
+          const audioBuffer = await audioContext.decodeAudioData(audioUint8Array.buffer);
 
-            const source = audioContext.createBufferSource();
-            source.buffer = audioBuffer;
-            source.connect(audioContext.destination);
-            source.start(0);
-        } catch (error) {
-            console.error('Error handling audio stream:', error);
-            setErrorMessage('Error handling audio stream');
-            setButtonLabel('Speak');
-            setIsProcessing(false);
-            logButtonStateChange('Speak');
-        }
-    } else {
-        console.error('No audioStream in response:', data);
-        setErrorMessage('No audioStream in response');
-        setButtonLabel('Speak');
-        setIsProcessing(false);
-        logButtonStateChange('Speak');
-    }
+          const source = audioContext.createBufferSource();
+          source.buffer = audioBuffer;
+          source.connect(audioContext.destination);
+          source.start(0);
+      } catch (error) {
+          console.error('Error handling audio stream:', error);
+          setErrorMessage('Error handling audio stream');
+          setButtonLabel('Speak');
+          setIsProcessing(false);
+          logButtonStateChange('Speak');
+      }
+  } else {
+      console.error('No audioStream in response:', data);
+      setErrorMessage('No audioStream in response');
+      setButtonLabel('Speak');
+      setIsProcessing(false);
+      logButtonStateChange('Speak');
+  }
 };
 
 const synthesizeSpeech = async (text) => {
-    const params = {
-        OutputFormat: 'mp3',
-        Text: text,
-        VoiceId: 'Joanna', // You can choose any available voice
-    };
+  const params = {
+      OutputFormat: 'mp3',
+      Text: text,
+      VoiceId: 'Joanna', // You can choose any available voice
+  };
 
-    try {
-        const start = performance.now();
-        const data = await polly.synthesizeSpeech(params).promise();
-        const end = performance.now();
-        console.log(`polly.synthesizeSpeech took ${end - start} ms`);
-        const audioBlob = new Blob([data.AudioStream], { type: 'audio/mpeg' });
-        const audioUrl = URL.createObjectURL(audioBlob);
-        return audioUrl;
-    } catch (error) {
-        console.error('Error synthesizing speech:', error);
-        throw error;
-    }
+  try {
+      const start = performance.now();
+      const data = await polly.synthesizeSpeech(params).promise();
+      const end = performance.now();
+      console.log(`polly.synthesizeSpeech took ${end - start} ms`);
+      const audioBlob = new Blob([data.AudioStream], { type: 'audio/mpeg' });
+      const audioUrl = URL.createObjectURL(audioBlob);
+      return audioUrl;
+  } catch (error) {
+      console.error('Error synthesizing speech:', error);
+      throw error;
+  }
 };
 
 const processLexMessages = (res) => {
-    let finalMessages = [];
-    if (res.length > 0) {
-        res.forEach((mes) => {
-            if (mes.contentType === 'PlainText') {
-                const v1Format = { type: mes.contentType, value: mes.content, isLastMessageInGroup: 'false' };
-                finalMessages.push(v1Format);
-            }
-        });
-    }
-    return finalMessages;
+  let finalMessages = [];
+  if (res.length > 0) {
+      res.forEach((mes) => {
+          if (mes.contentType === 'PlainText') {
+              const v1Format = { type: mes.contentType, value: mes.content, isLastMessageInGroup: 'false' };
+              finalMessages.push(v1Format);
+          }
+      });
+  }
+  return finalMessages;
 };
 
 useEffect(() => {
-    const handleContinueConversation = () => {
-        startRecording();
-    };
+  const handleContinueConversation = () => {
+      startRecording();
+  };
 
-    const audioElement = audioElementRef.current;
-    if (audioElement) {
-        audioElement.onended = handleContinueConversation;
-    }
+  const audioElement = audioElementRef.current;
+  if (audioElement) {
+      audioElement.onended = handleContinueConversation;
+  }
 }, [messages]);
 
 const handleButtonClick = () => {
-    setErrorMessage('');
-    if (isProcessing) {
-        if (audioElementRef.current) {
-            audioElementRef.current.pause();
-            audioElementRef.current.currentTime = 0;
-            setButtonLabel('Speak');
-            setIsProcessing(false);
-            logButtonStateChange('Speak');
-        }
-    } else if (isRecording) {
-        stopRecording();
-    } else {
-        startRecording();
-    }
+  setErrorMessage('');
+  if (isProcessing) {
+      if (audioElementRef.current) {
+          audioElementRef.current.pause();
+          audioElementRef.current.currentTime = 0;
+          setButtonLabel('Speak');
+          setIsProcessing(false);
+          logButtonStateChange('Speak');
+      }
+  } else if (isRecording) {
+      stopRecording();
+  } else {
+      startRecording();
+  }
+};
+
+const handleInputChange = (e) => {
+  const value = e.target.value;
+  setInputText(value);
+  if (value.trim() !== '') {
+      setButtonLabel('Send');
+  } else {
+      setButtonLabel('Speak');
+  }
 };
 
 return (
-    <div className="chatbot">
-        <div className="chat-window">
-            {messages.map((msg, index) => (
-                <div key={index} className={`messages ${msg.sender}`}>
-                    {msg.text}
-                </div>
-            ))}
-        </div>
-        <div className="input-area">
-            <input
-                type="text"
-                onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleSendMessage(e.target.value);
-                }}
-            />
-            <button onClick={handleButtonClick} disabled={isProcessing}>
-                {buttonLabel}
-            </button>
-            
-            {errorMessage && <div className="error-message">{errorMessage}</div>}
-        </div>
-        <audio id="audioPlayer" ref={audioElementRef} />
-    </div>
+  <div className="chatbot">
+      <div className="chat-window">
+          {messages.map((msg, index) => (
+              <div key={index} className={`messages ${msg.sender}`}>
+                  {msg.text}
+              </div>
+          ))}
+      </div>
+      <div className="input-area">
+          <input
+              type="text"
+              value={inputText}
+              onChange={handleInputChange}
+              onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleSendMessage(e.target.value);
+              }}
+              disabled={isRecording || isProcessing}
+          />
+          <button onClick={handleButtonClick} disabled={isProcessing}>
+              {buttonLabel}
+          </button>
+          
+          {errorMessage && <div className="error-message">{errorMessage}</div>}
+      </div>
+      <audio id="audioPlayer" ref={audioElementRef} />
+  </div>
 );
 };
 
