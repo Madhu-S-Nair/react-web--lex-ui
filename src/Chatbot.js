@@ -85,15 +85,6 @@ const Chatbot = () => {
     return btoa(String.fromCharCode(...new Uint8Array(result)));
   };
 
-  const playAudioBeforeSending = (audioBlob) => {
-    const audioUrl = URL.createObjectURL(audioBlob);
-    const audioElement = new Audio(audioUrl);
-    audioElement.play();
-    audioElement.onended = () => {
-      handleVoiceMessage(audioBlob);
-    };
-  };
-
   const processAndSendAudio = async (audioBlob) => {
     const arrayBuffer = await audioBlob.arrayBuffer();
     const audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -102,7 +93,7 @@ const Chatbot = () => {
     const resampledBuffer = await resampleAudio(audioBuffer, 16000);
     const l16Blob = audioBufferToWav(resampledBuffer);
 
-    playAudioBeforeSending(l16Blob);
+    handleVoiceMessage(l16Blob);
   };
 
   const resampleAudio = (audioBuffer, targetSampleRate) => {
@@ -210,7 +201,6 @@ const Chatbot = () => {
       let botMessages = b64CompressedToObject(data.messages);
       console.log('Bot says:', botMessages);
       botMessages = processLexMessages(botMessages);
-      synthesizeSpeech(botMessages.map(msg => msg.value).join(' '));
 
       setMessages((prevMessages) => [
         ...prevMessages,
@@ -218,7 +208,7 @@ const Chatbot = () => {
       ]);
    // Use Polly to synthesize speech and play audio
    try {
-    const audioUrl = await synthesizeSpeech(botMessages);
+    const audioUrl = await synthesizeSpeech(botMessages.map(msg => msg.value).join(' '));
     const audioElement = new Audio(audioUrl);
     audioElement.play().catch((error) => {
       console.error('Error playing audio:', error);
