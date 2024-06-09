@@ -17,6 +17,7 @@ const b64CompressedToObject = (src) => {
 const Chatbot = () => {
   const [messages, setMessages] = useState([]);
   const [isRecording, setIsRecording] = useState(false);
+  const [audioElement, setAudioElement] = useState(null);
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
   const sessionAttributes = useRef({});
@@ -221,6 +222,7 @@ const Chatbot = () => {
       try {
         const audioUrl = await synthesizeSpeech(botMessages.map((msg) => msg.value).join(' '));
         const audioElement = new Audio(audioUrl);
+        setAudioElement(audioElement); // Store the audio element in the state
         audioElement.play().catch((error) => {
           console.error('Error playing audio:', error);
         });
@@ -236,7 +238,7 @@ const Chatbot = () => {
         const audioContext = new (window.AudioContext || window.webkitAudioContext)();
         const audioUint8Array = new Uint8Array(data.audioStream);
         const audioBuffer = await audioContext.decodeAudioData(audioUint8Array.buffer);
-  
+
         const source = audioContext.createBufferSource();
         source.buffer = audioBuffer;
         source.connect(audioContext.destination);
@@ -248,14 +250,14 @@ const Chatbot = () => {
       console.error('No audioStream in response:', data);
     }
   };
-  
+
   const synthesizeSpeech = async (text) => {
     const params = {
       OutputFormat: 'mp3',
       Text: text,
       VoiceId: 'Joanna', // You can choose any available voice
     };
-  
+
     try {
       const start = performance.now();
       const data = await polly.synthesizeSpeech(params).promise();
@@ -269,7 +271,7 @@ const Chatbot = () => {
       throw error;
     }
   };
-  
+
   const processLexMessages = (res) => {
     let finalMessages = [];
     if (res.length > 0) {
@@ -282,18 +284,25 @@ const Chatbot = () => {
     }
     return finalMessages;
   };
-  
+
+  const stopAudioPlayback = () => {
+    if (audioElement) {
+      audioElement.pause();
+      audioElement.currentTime = 0;
+    }
+  };
+
   useEffect(() => {
     const handleContinueConversation = () => {
       startRecording();
     };
-  
+
     const audioElement = document.querySelector('audio');
     if (audioElement) {
       audioElement.onended = handleContinueConversation;
     }
   }, [messages]);
-  
+
   return (
     <div className="chatbot">
       <div className="chat-window">
@@ -313,9 +322,11 @@ const Chatbot = () => {
         <button onClick={isRecording ? stopRecording : startRecording}>
           {isRecording ? 'Stop' : 'Mic'}
         </button>
+        <button onClick={stopAudioPlayback}>Stop Polly</button>
       </div>
       <audio id="audioPlayer" />
     </div>
   );
 }
-  export default Chatbot;
+
+export default Chatbot;
