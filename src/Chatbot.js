@@ -203,7 +203,7 @@ const Chatbot = () => {
     reader.readAsArrayBuffer(audioBlob);
   };
 
-  const handleLexResponse = (data) => {
+  const handleLexResponse =  async(data) => {
     console.log('Lex response:', data);
 
     if (data.messages) {
@@ -224,36 +224,29 @@ const Chatbot = () => {
       try {
         const audioContext = new (window.AudioContext || window.webkitAudioContext)();
         const audioUint8Array = new Uint8Array(data.audioStream);
-        
-        // Depending on the content type, we need to correctly specify the MIME type.
-        let audioBlob;
-        if (data.contentType === 'audio/mpeg') {
-          audioBlob = new Blob([audioUint8Array], { type: 'audio/mpeg' });
-        } else if (data.contentType === 'audio/ogg') {
-          audioBlob = new Blob([audioUint8Array], { type: 'audio/ogg' });
-        } else if (data.contentType === 'audio/wav' || data.contentType === 'audio/pcm') {
-          audioBlob = new Blob([audioUint8Array], { type: 'audio/wav' });
-        } else {
-          console.error('Unsupported audio content type:', data.contentType);
-          return;
-        }
   
+        // Assuming audio/pcm format here, but adapt based on data.contentType if necessary
+        const audioBuffer = await audioContext.decodeAudioData(audioUint8Array.buffer);
+        const source = audioContext.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(audioContext.destination);
+        source.start(0);
+  
+        // Optional: Create an audio element for fallback
+        const audioBlob = new Blob([audioUint8Array.buffer], { type: 'audio/wav' });
         const audioUrl = URL.createObjectURL(audioBlob);
         const audioElement = new Audio(audioUrl);
-        
-        audioElement.addEventListener('error', (event) => {
-          console.error('Error playing audio:', event);
-        });
-  
         audioElement.play().catch((error) => {
-          console.error('Error playing audio:', error);
+          console.error('Error playing fallback audio:', error);
         });
       } catch (error) {
         console.error('Error handling audio stream:', error);
       }
     } else {
       console.error('No audioStream in response:', data);
-    }
+    } 
+  
+
   
   };
 
