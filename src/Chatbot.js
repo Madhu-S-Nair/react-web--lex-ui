@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { AWS, LEX_BOT_NAME, LEX_BOT_ALIAS, LEX_BOT_LOCALE } from './aws-config';
-import { v4 as uuidv4 } from 'uuid';
 import pako from 'pako';
 
 const lexRuntimeV2 = new AWS.LexRuntimeV2();
@@ -10,6 +9,7 @@ const Chatbot = () => {
   const [isRecording, setIsRecording] = useState(false);
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
+
   const sessionAttributes = useRef({});
 
   const handleSendMessage = async (inputText) => {
@@ -47,10 +47,7 @@ const Chatbot = () => {
     setIsRecording(true);
     navigator.mediaDevices.getUserMedia({ audio: true })
       .then(stream => {
-        const mediaRecorder = new MediaRecorder(stream, {
-          mimeType: 'audio/webm;codecs=pcm',
-          audioBitsPerSecond: 128000,
-        });
+        const mediaRecorder = new MediaRecorder(stream);
         mediaRecorderRef.current = mediaRecorder;
 
         mediaRecorder.ondataavailable = event => {
@@ -93,20 +90,18 @@ const Chatbot = () => {
     const reader = new FileReader();
     reader.onload = () => {
       const mediaType = audioBlob.type;
-      const audioData = new Uint8Array(reader.result);
+      const audioData = reader.result;
       let contentType = mediaType;
-      let offset = 0;
       let acceptFormat = 'audio/pcm';
 
       if (mediaType.startsWith('audio/wav')) {
         contentType = 'audio/x-l16; sample-rate=16000; channel-count=1';
       } else if (mediaType.startsWith('audio/ogg')) {
-        contentType =
-          'audio/x-cbr-opus-with-preamble; bit-rate=32000;' +
-          ` frame-size-milliseconds=20; preamble-size=${offset}`;
+        contentType = 'audio/x-cbr-opus-with-preamble; bit-rate=32000;';
       } else {
         console.warn('unknown media type in lex client');
       }
+
       const sessionState = {
         sessionAttributes: sessionAttributes.current
       };
@@ -118,7 +113,7 @@ const Chatbot = () => {
         sessionId: AWS.config.credentials.identityId,
         responseContentType: acceptFormat,
         requestContentType: contentType,
-        inputStream: audioData,
+        inputStream: audioBlob, // Send as Blob
         sessionState: compressAndB64Encode(sessionState),
       };
 
