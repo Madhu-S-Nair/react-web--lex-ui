@@ -3,6 +3,7 @@ import { AWS, LEX_BOT_NAME, LEX_BOT_ALIAS, LEX_BOT_LOCALE } from './aws-config';
 import pako from 'pako';
 
 const lexRuntimeV2 = new AWS.LexRuntimeV2();
+const polly = new AWS.Polly();
 
 const b64CompressedToObject = (src) => {
   const binaryString = atob(src); // Decode base64 string
@@ -209,7 +210,8 @@ const Chatbot = () => {
       let botMessages = b64CompressedToObject(data.messages);
       console.log('Bot says:', botMessages);
       botMessages = processLexMessages(botMessages);
-      
+      synthesizeSpeech(botMessages.map(msg => msg.value).join(' '));
+
       setMessages((prevMessages) => [
         ...prevMessages,
         ...botMessages.map(msg => ({ text: msg.value, sender: 'bot' }))
@@ -239,6 +241,25 @@ const Chatbot = () => {
     } else {
       console.error('No audioStream in response:', data);
     }
+  };
+
+  const synthesizeSpeech = (text) => {
+    const params = {
+      OutputFormat: 'mp3',
+      Text: text,
+      VoiceId: 'Joanna',
+    };
+
+    polly.synthesizeSpeech(params, (err, data) => {
+      if (err) {
+        console.error(err);
+      } else if (data && data.AudioStream instanceof Buffer) {
+        const audioBlob = new Blob([data.AudioStream], { type: 'audio/mpeg' });
+        const audioUrl = URL.createObjectURL(audioBlob);
+        const audioElement = new Audio(audioUrl);
+        audioElement.play();
+      }
+    });
   };
 
   const processLexMessages = (res) => {
