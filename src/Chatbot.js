@@ -4,6 +4,13 @@ import pako from 'pako';
 
 const lexRuntimeV2 = new AWS.LexRuntimeV2();
 
+const b64CompressedToObject= (src) => {
+  const decompressedData = pako.ungzip(byteArray);
+  const jsonString = new TextDecoder().decode(decompressedData);
+  return JSON.parse(jsonString);
+}
+
+
 const Chatbot = () => {
   const [messages, setMessages] = useState([]);
   const [isRecording, setIsRecording] = useState(false);
@@ -111,7 +118,7 @@ const Chatbot = () => {
   };
 
   const audioBufferToWav = (audioBuffer) => {
-    const numOfChan = audioBuffer.numberOfChannels,
+    let numOfChan = audioBuffer.numberOfChannels,
           length = audioBuffer.length * numOfChan * 2 + 44,
           buffer = new ArrayBuffer(length),
           view = new DataView(buffer),
@@ -197,7 +204,7 @@ const Chatbot = () => {
     console.log('Lex response:', data);
 
     if (data.messages && Array.isArray(data.messages)) {
-      const botMessage = data.messages.map((message) => message.content).join(' ');
+      const botMessage = b64CompressedToObject(data.messages);
       console.log('Bot says:', botMessage);
       setMessages((prevMessages) => [
         ...prevMessages,
