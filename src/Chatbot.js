@@ -9,7 +9,6 @@ const Chatbot = () => {
   const [isRecording, setIsRecording] = useState(false);
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
-
   const sessionAttributes = useRef({});
 
   const handleSendMessage = async (inputText) => {
@@ -56,7 +55,7 @@ const Chatbot = () => {
 
         mediaRecorder.onstop = () => {
           const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
-          playAudioBeforeSending(audioBlob);
+          processAndSendAudio(audioBlob);
           audioChunksRef.current = [];
         };
 
@@ -72,38 +71,104 @@ const Chatbot = () => {
   };
 
   const compressAndB64Encode = (src) => {
-    let result = pako.gzip(JSON.stringify(src));
+    const result = pako.gzip(JSON.stringify(src));
     return btoa(String.fromCharCode(...new Uint8Array(result)));
   };
 
   const playAudioBeforeSending = (audioBlob) => {
     const audioUrl = URL.createObjectURL(audioBlob);
-    const audioElement = document.createElement('audio');
-    audioElement.src = audioUrl;
+    const audioElement = new Audio(audioUrl);
     audioElement.play();
     audioElement.onended = () => {
       handleVoiceMessage(audioBlob);
     };
   };
 
+  const processAndSendAudio = async (audioBlob) => {
+    const arrayBuffer = await audioBlob.arrayBuffer();
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+
+    const resampledBuffer = await resampleAudio(audioBuffer, 16000);
+    const l16Blob = audioBufferToWav(resampledBuffer);
+
+    playAudioBeforeSending(l16Blob);
+  };
+
+  const resampleAudio = (audioBuffer, targetSampleRate) => {
+    return new Promise((resolve) => {
+      const numChannels = audioBuffer.numberOfChannels;
+      const length = audioBuffer.length * targetSampleRate / audioBuffer.sampleRate;
+      const offlineContext = new OfflineAudioContext(numChannels, length, targetSampleRate);
+
+      const bufferSource = offlineContext.createBufferSource();
+      bufferSource.buffer = audioBuffer;
+
+      bufferSource.connect(offlineContext.destination);
+      bufferSource.start(0);
+      offlineContext.startRendering().then(resolve);
+    });
+  };
+
+  const audioBufferToWav = (audioBuffer) => {
+    const numOfChan = audioBuffer.numberOfChannels,
+          length = audioBuffer.length * numOfChan * 2 + 44,
+          buffer = new ArrayBuffer(length),
+          view = new DataView(buffer),
+          channels = [],
+          sample=44000,
+          offset = 0,
+          pos = 0;
+
+    setUint32(0x46464952); // "RIFF"
+    setUint32(length - 8); // file length - 8
+    setUint32(0x45564157); // "WAVE"
+
+    setUint32(0x20746d66); // "fmt " chunk
+    setUint32(16); // length = 16
+    setUint16(1); // PCM (uncompressed)
+    setUint16(numOfChan);
+    setUint32(audioBuffer.sampleRate);
+    setUint32(audioBuffer.sampleRate * 2 * numOfChan); // avg. bytes/sec
+    setUint16(numOfChan * 2); // block-align
+    setUint16(16); // 16-bit (hardcoded in this demo)
+
+    setUint32(0x61746164); // "data" - chunk
+    setUint32(length - pos - 4); // chunk length
+
+    for (let i = 0; i < audioBuffer.numberOfChannels; i++)
+      channels.push(audioBuffer.getChannelData(i));
+
+    while (pos < length) {
+      for (let i = 0; i < numOfChan; i++) { // interleave channels
+        sample = Math.max(-1, Math.min(1, channels[i][offset])); // clamp
+        sample = (0.5 + sample * 32767) | 0; // scale to 16-bit signed int
+        view.setInt16(pos, sample, true); // write 16-bit sample
+        pos += 2;
+      }
+      offset++; // next source sample
+    }
+
+    return new Blob([buffer], { type: 'audio/x-l16' });
+
+    function setUint16(data) {
+      view.setUint16(pos, data, true);
+      pos += 2;
+    }
+
+    function setUint32(data) {
+      view.setUint32(pos, data, true);
+      pos += 4;
+    }
+  };
+
   const handleVoiceMessage = (audioBlob) => {
     const reader = new FileReader();
     reader.onload = () => {
-      const mediaType = audioBlob.type;
       const audioData = reader.result;
-      let contentType = mediaType;
-      let acceptFormat = 'audio/pcm';
-
-      if (mediaType.startsWith('audio/wav')) {
-        contentType = 'audio/x-l16; sample-rate=16000; channel-count=1';
-      } else if (mediaType.startsWith('audio/ogg')) {
-        contentType = 'audio/x-cbr-opus-with-preamble; bit-rate=32000;';
-      } else {
-        console.warn('unknown media type in lex client');
-      }
 
       const sessionState = {
-        sessionAttributes: sessionAttributes.current
+        sessionAttributes: sessionAttributes.current,
       };
 
       const params = {
@@ -111,9 +176,9 @@ const Chatbot = () => {
         botId: LEX_BOT_NAME,
         localeId: LEX_BOT_LOCALE,
         sessionId: AWS.config.credentials.identityId,
-        responseContentType: acceptFormat,
-        requestContentType: contentType,
-        inputStream: audioBlob, // Send as Blob
+        responseContentType: 'audio/pcm',
+        requestContentType: 'audio/x-l16; sample-rate=16000; channel-count=1',
+        inputStream: new Blob([audioData], { type: 'audio/x-l16' }), // Use processed audio blob
         sessionState: compressAndB64Encode(sessionState),
       };
 
@@ -132,17 +197,18 @@ const Chatbot = () => {
     console.log('Lex response:', data);
 
     if (data.messages && Array.isArray(data.messages)) {
-      const botMessages = data.messages.map((message) => ({
-        text: message.content,
-        sender: 'bot',
-      }));
-      setMessages(prevMessages => [...prevMessages, ...botMessages]);
+      const botMessage = data.messages.map((message) => message.content).join(' ');
+      console.log('Bot says:', botMessage);
+      setMessages((prevMessages) => [
+        ...prevMessages,
+        { text: botMessage, sender: 'bot' }
+      ]);
     } else {
       console.error('No messages in response:', data);
     }
 
     if (data.audioStream) {
-      const audioBlob = new Blob([data.audioStream], { type: 'audio/mpeg' });
+      const audioBlob = new Blob([data.audioStream], { type: 'audio/wav' });
       const audioUrl = URL.createObjectURL(audioBlob);
       const audioElement = document.getElementById('audioPlayer');
       audioElement.src = audioUrl;
@@ -180,7 +246,7 @@ const Chatbot = () => {
           {isRecording ? 'Stop' : 'Mic'}
         </button>
       </div>
-      <audio id="audioPlayer" controls style={{ display: 'none' }}></audio>
+      <audio id="audioPlayer" />
     </div>
   );
 };
