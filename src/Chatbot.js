@@ -47,7 +47,10 @@ const Chatbot = () => {
     setIsRecording(true);
     navigator.mediaDevices.getUserMedia({ audio: true })
       .then(stream => {
-        const mediaRecorder = new MediaRecorder(stream);
+        const mediaRecorder = new MediaRecorder(stream, {
+          mimeType: 'audio/webm;codecs=pcm',
+          audioBitsPerSecond: 128000,
+        });
         mediaRecorderRef.current = mediaRecorder;
 
         mediaRecorder.ondataavailable = event => {
@@ -93,7 +96,7 @@ const Chatbot = () => {
       const audioData = new Uint8Array(reader.result);
       let contentType = mediaType;
       let offset = 0;
-      let acceptFormat = 'audio/mpeg';
+      let acceptFormat = 'audio/pcm';
 
       if (mediaType.startsWith('audio/wav')) {
         contentType = 'audio/x-l16; sample-rate=16000; channel-count=1';
@@ -132,6 +135,7 @@ const Chatbot = () => {
 
   const handleLexResponse = (data) => {
     console.log('Lex response:', data);
+
     if (data.messages && Array.isArray(data.messages)) {
       const botMessages = data.messages.map((message) => ({
         text: message.content,
