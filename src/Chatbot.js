@@ -437,18 +437,7 @@ const Chatbot = () => {
         ))}
       </div>
       <div className="input-area">
-        <input
-          type="text"
-          value={inputText}
-          onChange={handleInputChange}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') handleSendMessage(e.target.value);
-          }}
-          disabled={isRecording || isProcessing}
-        />
-        <button onClick={handleSendMessage} disabled={isProcessing || inputText.trim() === ''}>
-          Send
-        </button>
+       
         <button onClick={handleButtonClick} disabled={isProcessing}>
           {buttonLabel}
         </button>
